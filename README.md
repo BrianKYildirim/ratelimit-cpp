@@ -1,6 +1,6 @@
 # ratelimit-cpp
 
-A tiny, fast C++20 rate limiter library with an in-process, sharded token-bucket core, clean C++ and C interfaces, and first-class CMake packaging. Ships with examples, unit tests, and optional Google Benchmark suite.
+A tiny, fast C++20 rate limiter library with an in-process, sharded token-bucket core, clean C++ and C interfaces, and first-class CMake packaging. Ships with examples, unit tests, and an optional Google Benchmark suite.
 
 - OS: Windows (MSYS2/MinGW, MSVC), Linux, macOS
 - Toolchain: CMake (≥3.16), Ninja (recommended), C++20
@@ -31,6 +31,7 @@ A tiny, fast C++20 rate limiter library with an in-process, sharded token-bucket
     │  ├─ rate_limiter.h
     │  ├─ ratelimit_c.h
     │  ├─ types.h
+    │  ├─ version.h
     │  └─ version.h.in           # Template -> generated version.h at build time
     ├─ src/
     │  └─ inproc_rate_limiter.cpp
@@ -56,19 +57,19 @@ A tiny, fast C++20 rate limiter library with an in-process, sharded token-bucket
 
 1) Configure the build (static core + shared C++ and C DLLs by default):
 
-    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+    `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`
 
 2) Build:
 
-    ninja -C build
+    `ninja -C build`
 
 3) Run tests (if enabled):
 
-    ctest --test-dir build --output-on-failure
+    `ctest --test-dir build --output-on-failure`
 
 4) Install (choose your prefix):
 
-    cmake --install build --prefix "C:/Users/you/ratelimit-install"
+    `cmake --install build --prefix "C:/Users/you/ratelimit-install"`
 
 You’ll find:
 - Headers under `<prefix>/include/ratelimit`
@@ -180,7 +181,7 @@ Example output (will vary by CPU):
 
 - On Windows, public API functions/classes are decorated with `__declspec(dllexport/dllimport)` via `RL_API` macro in headers.
 - On Unix-like platforms, shared libraries are compiled with `-fvisibility=hidden -fvisibility-inlines-hidden` and public symbols explicitly exported with `RL_API`.
-- The static core (`ratelimit_core`) defines `RL_STATIC` privately so headers compiled within that target use non-dll semantics without leaking to downstream consumers.
+- The static core (`ratelimit_core`) defines `RL_STATIC` privately, so headers compiled within that target use non-dll semantics without leaking to downstream consumers.
 
 ---
 
@@ -211,16 +212,6 @@ Example:
 
 ---
 
-## How to contribute
-
-- Fork and create a topic branch
-- Keep PRs focused and add tests
-- Follow the project’s code style (clang-format optional)
-- Document any API changes in README
-- CI should pass across platforms
-
----
-
 ## FAQ
 
 **Q: Which target should I link?**  
@@ -233,7 +224,7 @@ Make sure the `bin` folder containing DLLs is on `PATH` at runtime. When using M
 Per-key operations are safe; the structure uses sharded maps and shared/unique locks internally. Your own key strings should remain valid for the duration of each call.
 
 **Q: License?**  
-See LICENSE file (choose your license before publishing).
+See the LICENSE file.
 
 ---
 
