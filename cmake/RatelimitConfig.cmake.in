@@ -1,0 +1,15 @@
+# ---- RatelimitConfig.cmake (installed) ----
+# Used by: find_package(Ratelimit CONFIG REQUIRED)
+
+# Load helpers if available (defines find_dependency and, on most CMake versions,
+# check_required_components). Make it OPTIONAL to avoid hard failure on older/minimal installs.
+include(CMakeFindDependencyMacro OPTIONAL)
+
+# Import the exported targets from the install tree
+include("${CMAKE_CURRENT_LIST_DIR}/ratelimitTargets.cmake")
+
+# If the helper exists, respect REQUIRED/components (we don't use components yet,
+# but this keeps the config future-proof).
+if(COMMAND check_required_components)
+  check_required_components(Ratelimit)
+endif()
