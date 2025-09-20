@@ -1,0 +1,23 @@
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup CMake
+        uses: lukka/get-cmake@v3.29.2
+      - name: Configure
+        run: cmake -S . -B build -DRL_BUILD_TESTS=ON -DRL_BUILD_BENCH=ON
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
