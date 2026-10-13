@@ -1,240 +1,550 @@
-# ratelimit-cpp
+# C++ Rate Limiter
 
-A tiny, fast C++20 rate limiter library with an in-process, sharded token-bucket core, clean C++ and C interfaces, and first-class CMake packaging. Ships with examples, unit tests, and an optional Google Benchmark suite.
+A fast, thread-safe, in-process token-bucket rate limiter for C++20 applications.
 
-- OS: Windows (MSYS2/MinGW, MSVC), Linux, macOS
-- Toolchain: CMake (≥3.16), Ninja (recommended), C++20
-- Packaging: `find_package(Ratelimit CONFIG REQUIRED)` and pkg-config
-- Visibility: Exports controlled via `RL_API`, hidden by default on shared builds
-
----
+The library provides a sharded implementation designed for concurrent workloads, precise fixed-point refill calculations, and multiple integration options through C++, C, and optional JNI bindings.
 
 ## Features
 
-- Sharded in-process token-bucket implementation for excellent concurrency
-- Fixed-point arithmetic for precise refill and capacity handling
-- Header-only public API surface with compact implementation
-- Clean separation of concerns (core, C API, JNI optional)
-- Unit tests with GoogleTest
-- Optional microbenchmarks with Google Benchmark
-- CMake install rules + `RatelimitConfig.cmake` for downstream `find_package`
-- Optional `ratelimit.pc` for pkg-config consumers
+- C++20 API
+- Thread-safe, in-process rate limiting
+- Sharded key storage to reduce lock contention
+- Token-bucket algorithm
+- Fixed-point arithmetic for precise refill behavior
+- Per-key limits
+- Configurable capacity and refill rate
+- C-compatible API
+- Optional Java/JNI bridge
+- CMake package installation support
+- `find_package(Ratelimit CONFIG REQUIRED)` integration
+- Optional `pkg-config` metadata
+- GoogleTest unit tests
+- Google Benchmark performance tests
+- Optional ThreadSanitizer support
+- Windows, Linux, and macOS support
 
----
+## How It Works
 
-## Directory layout
+Each key receives its own token bucket.
 
-    .
-    ├─ include/ratelimit/        # Public headers
-    │  ├─ clock.h
-    │  ├─ export.h
-    │  ├─ rate_limiter.h
-    │  ├─ ratelimit_c.h
-    │  ├─ types.h
-    │  ├─ version.h
-    │  └─ version.h.in           # Template -> generated version.h at build time
-    ├─ src/
-    │  └─ inproc_rate_limiter.cpp
-    ├─ c_api/
-    │  └─ ratelimit_c.cpp
-    ├─ bench/
-    │  └─ bench_core.cpp         # Optional (GBM)
-    ├─ tests/
-    │  └─ test_core.cpp          # GoogleTest
-    ├─ examples/
-    │  └─ cli.cpp                # Simple CLI smoke test
-    ├─ cmake/
-    │  ├─ RatelimitConfig.cmake.in
-    │  └─ ratelimit.pc.in        # Optional pkg-config template
-    ├─ CMakeLists.txt
-    ├─ README.md
-    ├─ LICENSE
-    └─ .gitignore
+A bucket is configured with:
 
----
+- `capacity`: Maximum number of tokens the bucket can hold
+- `refill_per_sec`: Number of tokens added per second
 
-## Build from source (quick start)
+Each call to `allow()` attempts to consume one token:
 
-1) Configure the build (static core + shared C++ and C DLLs by default):
+- If a token is available, the request is allowed.
+- If no token is available, the request is denied.
+- The response includes the number of remaining tokens and the estimated time until the next token becomes available.
 
-    `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`
+```text
+Request key
+    │
+    ▼
+Hash key to a shard
+    │
+    ▼
+Lock only the selected shard
+    │
+    ▼
+Refill tokens based on elapsed time
+    │
+    ▼
+Consume one token if available
+    │
+    ▼
+Return allow/deny decision
+```
 
-2) Build:
+## C++ API
 
-    `ninja -C build`
+### Basic usage
 
-3) Run tests (if enabled):
+```cpp
+#include <iostream>
+#include <ratelimit/rate_limiter.h>
 
-    `ctest --test-dir build --output-on-failure`
+int main() {
+    rl::RateLimiterInProc limiter;
 
-4) Install (choose your prefix):
+    // Maximum of 10 tokens, refilling at 5 tokens per second.
+    rl::Limit limit{
+        .capacity = 10,
+        .refill_per_sec = 5
+    };
 
-    `cmake --install build --prefix "C:/Users/you/ratelimit-install"`
+    auto decision = limiter.allow("user:123", limit);
 
-You’ll find:
-- Headers under `<prefix>/include/ratelimit`
-- Libraries and import libs under `<prefix>/lib` (Linux/macOS) or `<prefix>/bin` and `<prefix>/lib` (Windows)
-- CMake package files under `<prefix>/lib/cmake/Ratelimit`
-- Optional `ratelimit.pc` under `<prefix>/lib/pkgconfig`
-
----
-
-## Using with CMake (as a consumer)
-
-### Option A: Use CMAKE_PREFIX_PATH
-
-    cmake -S consumer -B consumer-build -G Ninja -DCMAKE_PREFIX_PATH="C:/Users/you/ratelimit-install"
-    ninja -C consumer-build
-
-`consumer/CMakeLists.txt`:
-
-    cmake_minimum_required(VERSION 3.16)
-    project(consumer LANGUAGES CXX)
-    set(CMAKE_CXX_STANDARD 20)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-    find_package(Ratelimit CONFIG REQUIRED)
-
-    add_executable(consumer main.cpp)
-    # Link against the static core or the shared C++ library:
-    target_link_libraries(consumer PRIVATE Ratelimit::ratelimit_core)
-    # or: target_link_libraries(consumer PRIVATE Ratelimit::ratelimit)
-
-`consumer/main.cpp`:
-
-    #include <ratelimit/rate_limiter.h>
-    #include <iostream>
-    int main() {
-      rl::RateLimiterInProc limiter;
-      rl::Limit lim{10, 5};  // capacity=10, refill=5/s
-      auto d = limiter.allow("test-key", lim);
-      std::cout << (d.allowed ? "allowed" : "denied")
-                << " remaining=" << d.remaining
-                << " reset_ms=" << d.reset_ms << "\n";
-      return 0;
+    if (decision.allowed) {
+        std::cout << "Request allowed\n";
+    } else {
+        std::cout << "Request denied\n";
     }
 
-### Option B: Use Ratelimit_DIR
+    std::cout << "Remaining tokens: " << decision.remaining << '\n';
+    std::cout << "Reset time: " << decision.reset_ms << " ms\n";
 
-    cmake -S consumer -B consumer-build -G Ninja -DRatelimit_DIR="C:/Users/you/ratelimit-install/lib/cmake/Ratelimit"
-    ninja -C consumer-build
+    return 0;
+}
+```
 
----
+### Decision fields
 
-## Using from C (C API)
+```cpp
+struct Decision {
+    bool allowed;
+    uint64_t remaining;
+    uint64_t reset_ms;
+};
+```
 
-`c_consumer.c`:
+| Field | Description |
+|---|---|
+| `allowed` | Whether the request was accepted |
+| `remaining` | Whole tokens remaining in the bucket |
+| `reset_ms` | Milliseconds until another token is available when denied |
 
-    #include <ratelimit/ratelimit_c.h>
-    #include <stdio.h>
+### Custom configuration
 
-    int main() {
-      printf("%s\n", rl_version());
-      return 0;
-    }
+The in-process limiter can be configured with a custom number of shards and an expected capacity per shard.
 
-Compile and link against the installed C library (on Windows, add the install `bin` to PATH to run).
+```cpp
+rl::RateLimiterInProc::Config config{
+    .shards = 128,
+    .capacity_hint_per_shard = 1024
+};
 
----
+rl::RateLimiterInProc limiter(config);
+```
 
-## Example CLI
+The default configuration is:
+
+```text
+shards: 128
+capacity_hint_per_shard: 1024
+```
+
+### Clearing stored keys
+
+```cpp
+limiter.clear();
+```
+
+### Inspecting the number of tracked keys
+
+```cpp
+std::size_t key_count = limiter.size();
+```
+
+## C API
+
+The library also provides a C-compatible interface through:
+
+```c
+#include <ratelimit/ratelimit_c.h>
+```
+
+Example:
+
+```c
+#include <ratelimit/ratelimit_c.h>
+#include <stdio.h>
+
+int main(void) {
+    void* limiter = rl_new_inproc(128, 1024);
+
+    rl_limit_t limit = {
+        .capacity = 10,
+        .refill_per_sec = 5
+    };
+
+    rl_decision_t decision = rl_allow(limiter, "user:123", limit);
+
+    printf("allowed=%s remaining=%llu reset_ms=%llu\n",
+           decision.allowed ? "yes" : "no",
+           (unsigned long long) decision.remaining,
+           (unsigned long long) decision.reset_ms);
+
+    rl_free(limiter);
+    return 0;
+}
+```
+
+The C API exposes:
+
+```c
+const char* rl_version(void);
+
+void* rl_new_inproc(
+    unsigned shards,
+    unsigned capacity_hint_per_shard
+);
+
+rl_decision_t rl_allow(
+    void* handle,
+    const char* key,
+    rl_limit_t limit
+);
+
+void rl_free(void* handle);
+```
+
+## Requirements
+
+- CMake 3.16 or newer
+- A compiler with C++20 support
+- Ninja is recommended but not required
+- Java and JNI development headers are required when JNI bindings are enabled
+
+Supported environments include:
+
+- Windows with MSVC or MSYS2/MinGW
+- Linux
+- macOS
+
+## Build From Source
+
+Clone the repository:
+
+```bash
+git clone https://github.com/BrianKYildirim/ratelimit-cpp.git
+cd ratelimit-cpp
+```
+
+Configure a Release build:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DRL_BUILD_JNI=OFF
+```
+
+Build the project:
+
+```bash
+cmake --build build
+```
+
+The build produces the following primary targets:
+
+- `ratelimit_core` — static C++ core library
+- `ratelimit` — optional shared C++ library
+- `ratelimit_c` — shared C-compatible library
+- `rl_cli` — command-line example
+- `rl_tests` — GoogleTest test executable
+- `rl_bench` — optional Google Benchmark executable
+
+> JNI is enabled by default in the current CMake configuration. Use `-DRL_BUILD_JNI=OFF` if Java/JNI is not installed.
+
+## Run the Example CLI
 
 After building:
 
-    ./build/rl_cli
-    Enter keys (Ctrl+D to exit). Using capacity=10, refill=5/s
-    foo
-    foo -> allowed=yes remaining=9 reset_ms=0
+```bash
+./build/rl_cli
+```
 
-You can also pipe input:
-
-    yes foo | head -n 15 | ./build/rl_cli
-
----
-
-## Benchmarks (optional)
-
-Enable at configure time:
-
-    cmake -S . -B build -G Ninja -DRL_BUILD_BENCH=ON -DCMAKE_BUILD_TYPE=Release
-    ninja -C build rl_bench
-    ./build/rl_bench
-
-Example output (will vary by CPU):
-
-    BM_UniformKeys        260 ns        items_per_second=3.8M/s
-    BM_HotKey             135 ns        items_per_second=7.4M/s
-
----
-
-## Design notes
-
-- Token bucket using Q32.32 fixed-point counters for precise refill math
-- Sharded hash map: key space split by FNV-1a hash; reduces lock contention
-- Read path first tries shared lock; insert uses unique lock
-- Clock abstraction for deterministic tests (mockable clock)
-- Overflow-safe arithmetic and careful atomics
-
----
-
-## Symbol visibility and ABI
-
-- On Windows, public API functions/classes are decorated with `__declspec(dllexport/dllimport)` via `RL_API` macro in headers.
-- On Unix-like platforms, shared libraries are compiled with `-fvisibility=hidden -fvisibility-inlines-hidden` and public symbols explicitly exported with `RL_API`.
-- The static core (`ratelimit_core`) defines `RL_STATIC` privately, so headers compiled within that target use non-dll semantics without leaking to downstream consumers.
-
----
-
-## Configuration switches
-
-Common CMake options:
-
-- `RL_BUILD_SHARED` (ON|OFF) — Build shared C++ library `ratelimit` in addition to static core
-- `RL_BUILD_TESTS` (ON|OFF) — Build and run GoogleTest unit tests
-- `RL_BUILD_BENCH` (ON|OFF) — Build Google Benchmark suite
-- `RL_BUILD_JNI` (ON|OFF) — Build JNI bridge (requires Java/JNI)
-- `RL_ENABLE_TSAN` (ON|OFF) — Build with ThreadSanitizer (where supported)
+The CLI reads keys from standard input and applies a default limit of 10 tokens with a refill rate of 5 tokens per second.
 
 Example:
 
-    cmake -S . -B build -G Ninja -DRL_BUILD_SHARED=ON -DRL_BUILD_TESTS=ON -DRL_BUILD_BENCH=OFF
+```text
+Enter keys (Ctrl+D to exit). Using capacity=10, refill=5/s
+user-1
+user-1 -> allowed=yes remaining=9 reset_ms=0
+user-1
+user-1 -> allowed=yes remaining=8 reset_ms=0
+```
 
----
+You can also pipe input into the CLI:
 
-## pkg-config
+```bash
+printf "user-1\nuser-1\nuser-1\n" | ./build/rl_cli
+```
 
-If you enabled pkg-config template, install produces `ratelimit.pc`.
+On Windows, use the generated executable path:
 
-Example:
+```powershell
+build\rl_cli.exe
+```
 
-    export PKG_CONFIG_PATH="/your/prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
-    pkg-config --cflags --libs ratelimit --define-prefix
+## Run Tests
 
----
+Tests are enabled by default.
 
-## FAQ
+Run the test suite through CTest:
 
-**Q: Which target should I link?**  
-Use `Ratelimit::ratelimit_core` for the static core or `Ratelimit::ratelimit` for the shared C++ library. The C API is in `libratelimit_c` (shared).
+```bash
+ctest --test-dir build --output-on-failure
+```
 
-**Q: Windows linking notes?**  
-Make sure the `bin` folder containing DLLs is on `PATH` at runtime. When using MSYS2/MinGW, you’ll see `libratelimit.dll` and import libs in `lib`.
+The tests cover:
 
-**Q: Thread safety?**  
-Per-key operations are safe; the structure uses sharded maps and shared/unique locks internally. Your own key strings should remain valid for the duration of each call.
+- Initial bucket capacity
+- Denial after tokens are exhausted
+- Token refill over time
+- Isolation between different keys
+- Zero-capacity behavior
+- Reset-time calculations
+- Deterministic clock-based testing
 
-**Q: License?**  
-See the LICENSE file.
+GoogleTest is downloaded automatically by CMake through `FetchContent` when tests are enabled.
 
----
+## Run Benchmarks
+
+Benchmarks are enabled by default.
+
+Build the benchmark target:
+
+```bash
+cmake --build build --target rl_bench
+```
+
+Run it:
+
+```bash
+./build/rl_bench
+```
+
+The benchmark suite measures:
+
+- Requests across many uniformly distributed keys
+- Repeated requests against a single hot key
+
+Benchmark results depend on the compiler, CPU, operating system, build configuration, and workload. Use Release builds when comparing performance.
+
+## CMake Options
+
+The project supports the following configuration options:
+
+| Option | Default | Description |
+|---|---:|---|
+| `RL_BUILD_SHARED` | `ON` | Build the shared C++ library |
+| `RL_BUILD_TESTS` | `ON` | Build GoogleTest tests |
+| `RL_BUILD_BENCH` | `ON` | Build Google Benchmark tests |
+| `RL_BUILD_JNI` | `ON` | Build Java/JNI bindings |
+| `RL_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer flags where supported |
+
+Example minimal build:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DRL_BUILD_SHARED=OFF \
+  -DRL_BUILD_TESTS=OFF \
+  -DRL_BUILD_BENCH=OFF \
+  -DRL_BUILD_JNI=OFF
+```
+
+Example development build with tests and benchmarks:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DRL_BUILD_TESTS=ON \
+  -DRL_BUILD_BENCH=ON \
+  -DRL_BUILD_JNI=OFF
+```
+
+## Install the Library
+
+Install the headers and libraries to a custom prefix:
+
+```bash
+cmake --install build --prefix ./install
+```
+
+The installation contains:
+
+```text
+install/
+├── include/ratelimit/       # Public headers
+├── lib/                     # Libraries and CMake package files
+├── bin/                     # Runtime DLLs on Windows
+└── lib/pkgconfig/           # pkg-config metadata
+```
+
+## Use From Another CMake Project
+
+After installing the library, point `CMAKE_PREFIX_PATH` at the installation directory:
+
+```bash
+cmake -S consumer -B consumer-build -G Ninja \
+  -DCMAKE_PREFIX_PATH="$PWD/install"
+
+cmake --build consumer-build
+```
+
+A consuming project's `CMakeLists.txt` can use:
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+
+project(example LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Ratelimit CONFIG REQUIRED)
+
+add_executable(example main.cpp)
+
+target_link_libraries(example
+    PRIVATE Ratelimit::ratelimit_core
+)
+```
+
+For the shared C++ library:
+
+```cmake
+target_link_libraries(example
+    PRIVATE Ratelimit::ratelimit
+)
+```
+
+The repository includes a sample consumer project in `consumer/`.
+
+## Thread Safety
+
+`RateLimiterInProc` is designed for concurrent access.
+
+The implementation:
+
+- Splits key storage across multiple shards
+- Uses locks at the shard level
+- Uses shared and exclusive locking where appropriate
+- Keeps operations for unrelated keys independent
+- Supports concurrent calls to `allow()`
+
+The number of shards can be adjusted through `RateLimiterInProc::Config`.
+
+More shards may reduce contention for workloads with many concurrent keys, while fewer shards may reduce overhead for smaller workloads.
+
+## Design Details
+
+### Sharded storage
+
+Keys are distributed across shards using a hash function. Each shard maintains its own bucket map and synchronization primitive.
+
+This reduces contention compared with protecting the entire key space with one global lock.
+
+### Token-bucket rate limiting
+
+Each key has a bucket with:
+
+- A maximum capacity
+- A current token count
+- A refill rate
+- A timestamp used to calculate elapsed time
+
+Requests consume one token when allowed. Tokens accumulate over time up to the configured capacity.
+
+### Fixed-point arithmetic
+
+The implementation uses fixed-point arithmetic internally to represent fractional token values while avoiding floating-point rounding problems during refill calculations.
+
+### Injectable clock
+
+The limiter accepts an optional clock abstraction, making time-dependent behavior deterministic and easy to test.
+
+```cpp
+class FakeClock : public rl::Clock {
+public:
+    uint64_t time_ns = 0;
+
+    uint64_t now_ns() const noexcept override {
+        return time_ns;
+    }
+};
+```
+
+This allows tests to advance time without sleeping.
+
+## Directory Structure
+
+```text
+ratelimit-cpp/
+├── include/ratelimit/
+│   ├── clock.h              # Clock abstraction
+│   ├── export.h             # Symbol visibility macros
+│   ├── rate_limiter.h       # Public C++ API
+│   ├── ratelimit_c.h        # Public C API
+│   ├── types.h              # Limits and decisions
+│   └── version.h.in         # Generated version header template
+├── src/
+│   └── inproc_rate_limiter.cpp
+├── c_api/
+│   └── ratelimit_c.cpp
+├── jni/
+│   └── ratelimit_jni.cpp
+├── examples/
+│   └── cli.cpp
+├── tests/
+│   └── test_core.cpp
+├── bench/
+│   └── bench_core.cpp
+├── consumer/
+│   ├── CMakeLists.txt
+│   └── main.cpp
+├── cmake/
+│   ├── RatelimitConfig.cmake.in
+│   └── ratelimit.pc.in
+├── CMakeLists.txt
+├── LICENSE
+└── README.md
+```
+
+## Use Cases
+
+This library can be used for:
+
+- API request throttling
+- Per-user request limits
+- Per-IP connection limits
+- Login attempt protection
+- Background job throttling
+- In-process service protection
+- Resource consumption limits
+- C and C++ server applications
+- Java applications through the optional JNI bridge
+
+## Scope and Limitations
+
+This is an **in-process** rate limiter.
+
+That means:
+
+- State exists only inside the current process.
+- Multiple processes do not share buckets.
+- Multiple machines do not share limits.
+- Restarting the process clears all in-memory buckets.
+- It is not a distributed replacement for Redis or another shared datastore.
+
+For distributed rate limiting across multiple service instances, use a shared external store or coordinate limits at the gateway layer.
+
+## Package Targets
+
+After installation, downstream CMake projects can link against:
+
+```cmake
+Ratelimit::ratelimit_core
+Ratelimit::ratelimit
+```
+
+The C library is provided through the `ratelimit_c` target.
+
+The project also installs a `ratelimit.pc` file for pkg-config-based workflows:
+
+```bash
+export PKG_CONFIG_PATH="$PWD/install/lib/pkgconfig:$PKG_CONFIG_PATH"
+pkg-config --cflags --libs ratelimit
+```
 
 ## License
 
-This project is released under the terms of the license in the LICENSE file.
+This project is released under the MIT License. See [`LICENSE`](LICENSE) for details.
 
 ---
 
-## Acknowledgments
-
-- GoogleTest, Google Benchmark
-- The broader C++ community for patterns on symbol visibility and CMake packaging
+Built with C++20, CMake, GoogleTest, and Google Benchmark.
