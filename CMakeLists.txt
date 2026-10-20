@@ -69,9 +69,12 @@ configure_file(
 )
 
 # ---------- Core library (static) ----------
-add_library(ratelimit_core STATIC
+set(RL_SOURCES
   src/inproc_rate_limiter.cpp
+  src/clock.cpp
 )
+
+add_library(ratelimit_core STATIC ${RL_SOURCES})
 
 target_include_directories(ratelimit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -84,9 +87,7 @@ target_compile_definitions(ratelimit_core PRIVATE RL_STATIC)
 
 # ---------- Optional shared library (C++) ----------
 if (RL_BUILD_SHARED)
-  add_library(ratelimit SHARED
-    src/inproc_rate_limiter.cpp
-  )
+  add_library(ratelimit SHARED ${RL_SOURCES})
   target_compile_definitions(ratelimit PRIVATE RL_EXPORTS)
   target_include_directories(ratelimit PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -170,6 +171,12 @@ if (RL_BUILD_TESTS)
   target_link_libraries(rl_tests PRIVATE ratelimit_core GTest::gtest_main)
   include(GoogleTest)
   gtest_discover_tests(rl_tests)
+
+  # C program against the shared C library: checks the C API is exported.
+  enable_language(C)
+  add_executable(rl_c_api_test tests/test_c_api.c)
+  target_link_libraries(rl_c_api_test PRIVATE ratelimit_c)
+  add_test(NAME c_api COMMAND rl_c_api_test)
 endif()
 
 # ---------- Benchmarks (Google Benchmark via FetchContent) ----------
@@ -196,6 +203,11 @@ if (RL_BUILD_BENCH)
 
   add_executable(rl_bench bench/bench_core.cpp)
   target_link_libraries(rl_bench PRIVATE ratelimit_core benchmark::benchmark)
+
+  # Latency percentiles and wall-clock throughput (no Google Benchmark).
+  find_package(Threads REQUIRED)
+  add_executable(rl_latency bench/latency.cpp)
+  target_link_libraries(rl_latency PRIVATE ratelimit_core Threads::Threads)
 endif()
 
 # ---------- Install / export ----------
