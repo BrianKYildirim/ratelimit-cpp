@@ -6,22 +6,23 @@ The library provides a sharded implementation designed for concurrent workloads,
 
 ## Features
 
-- C++20 API
-- Thread-safe, in-process rate limiting
-- Sharded key storage to reduce lock contention
-- Token-bucket algorithm
-- Fixed-point arithmetic for precise refill behavior
-- Per-key limits
-- Configurable capacity and refill rate
-- C-compatible API
-- Optional Java/JNI bridge
-- CMake package installation support
-- `find_package(Ratelimit CONFIG REQUIRED)` integration
-- Optional `pkg-config` metadata
-- GoogleTest unit tests
-- Google Benchmark performance tests
-- Optional ThreadSanitizer support
-- Windows, Linux, and macOS support
+* C++20 API
+* Thread-safe, in-process rate limiting with linearizable per-key decisions
+* Sharded open-addressing key storage: one hash and no allocation per lookup
+* Token-bucket algorithm
+* Exact integer refill arithmetic (no rounding drift)
+* Per-key limits
+* Configurable capacity and refill rate
+* Idle-key eviction to bound memory
+* C-compatible API
+* Optional Java/JNI bridge
+* CMake package installation support
+* `find_package(Ratelimit CONFIG REQUIRED)` integration
+* Optional `pkg-config` metadata
+* GoogleTest unit tests
+* Google Benchmark performance tests
+* Optional ThreadSanitizer support
+* Windows, Linux, and macOS support
 
 ## How It Works
 
@@ -29,14 +30,14 @@ Each key receives its own token bucket.
 
 A bucket is configured with:
 
-- `capacity`: Maximum number of tokens the bucket can hold
-- `refill_per_sec`: Number of tokens added per second
+* `capacity`: Maximum number of tokens the bucket can hold
+* `refill_per_sec`: Number of tokens added per second
 
 Each call to `allow()` attempts to consume one token:
 
-- If a token is available, the request is allowed.
-- If no token is available, the request is denied.
-- The response includes the number of remaining tokens and the estimated time until the next token becomes available.
+* If a token is available, the request is allowed.
+* If no token is available, the request is denied.
+* The response includes the number of remaining tokens and the estimated time until the next token becomes available.
 
 ```text
 Request key
@@ -61,7 +62,7 @@ Return allow/deny decision
 
 ### Basic usage
 
-```cpp
+```C++
 #include <iostream>
 #include <ratelimit/rate_limiter.h>
 
@@ -91,7 +92,7 @@ int main() {
 
 ### Decision fields
 
-```cpp
+```C++
 struct Decision {
     bool allowed;
     uint64_t remaining;
@@ -99,17 +100,19 @@ struct Decision {
 };
 ```
 
-| Field | Description |
-|---|---|
-| `allowed` | Whether the request was accepted |
-| `remaining` | Whole tokens remaining in the bucket |
-| `reset_ms` | Milliseconds until another token is available when denied |
+| Field       | Description                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `allowed`   | Whether the request was accepted                                                                                                                       |
+| `remaining` | Whole tokens remaining in the bucket                                                                                                                   |
+| `reset_ms`  | Milliseconds until another token is available when denied, rounded up; `0` if a token can never become available (`refill_per_sec` or `capacity` is 0) |
+
+`capacity` values above 18,446,744,073 (2^64 / 10^9) are clamped to that value.
 
 ### Custom configuration
 
 The in-process limiter can be configured with a custom number of shards and an expected capacity per shard.
 
-```cpp
+```C++
 rl::RateLimiterInProc::Config config{
     .shards = 128,
     .capacity_hint_per_shard = 1024
@@ -125,29 +128,42 @@ shards: 128
 capacity_hint_per_shard: 1024
 ```
 
+`shards` is rounded up to a power of two (1 to 65536). A shard reserves room for `capacity_hint_per_shard` keys the first time a key lands in it, so an unused limiter allocates almost nothing.
+
 ### Clearing stored keys
 
-```cpp
+```C++
 limiter.clear();
 ```
 
 ### Inspecting the number of tracked keys
 
-```cpp
+```C++
 std::size_t key_count = limiter.size();
 ```
+
+### Evicting idle keys
+
+Every distinct key is remembered until it is evicted or `clear()` is called. To bound memory when keys are unbounded (IP addresses, user IDs), periodically evict keys that have been idle for a while:
+
+```C++
+// Forget keys not seen for 10 minutes; returns how many were removed.
+std::size_t evicted = limiter.evict_idle(10ull * 60 * 1'000'000'000);
+```
+
+Eviction is invisible to callers as long as `idle_ns` is at least the time an empty bucket needs to refill completely (`capacity / refill_per_sec` seconds): such a key has refilled to capacity, which is exactly how a new key starts. Eviction locks one shard at a time and rebuilds only shards that lose keys.
 
 ## C API
 
 The library also provides a C-compatible interface through:
 
-```c
+```C
 #include <ratelimit/ratelimit_c.h>
 ```
 
 Example:
 
-```c
+```C
 #include <ratelimit/ratelimit_c.h>
 #include <stdio.h>
 
@@ -173,7 +189,7 @@ int main(void) {
 
 The C API exposes:
 
-```c
+```C
 const char* rl_version(void);
 
 void* rl_new_inproc(
@@ -188,33 +204,35 @@ rl_decision_t rl_allow(
 );
 
 void rl_free(void* handle);
+
+uint64_t rl_evict_idle(void* handle, uint64_t idle_ns);
 ```
 
 ## Requirements
 
-- CMake 3.16 or newer
-- A compiler with C++20 support
-- Ninja is recommended but not required
-- Java and JNI development headers are required when JNI bindings are enabled
+* CMake 3.16 or newer
+* A compiler with C++20 support
+* Ninja is recommended but not required
+* Java and JNI development headers are required when JNI bindings are enabled
 
 Supported environments include:
 
-- Windows with MSVC or MSYS2/MinGW
-- Linux
-- macOS
+* Windows with MSVC or MSYS2/MinGW
+* Linux
+* macOS
 
 ## Build From Source
 
 Clone the repository:
 
-```bash
+```Shell
 git clone https://github.com/BrianKYildirim/ratelimit-cpp.git
 cd ratelimit-cpp
 ```
 
 Configure a Release build:
 
-```bash
+```Shell
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DRL_BUILD_JNI=OFF
@@ -222,18 +240,18 @@ cmake -S . -B build -G Ninja \
 
 Build the project:
 
-```bash
+```Shell
 cmake --build build
 ```
 
 The build produces the following primary targets:
 
-- `ratelimit_core` — static C++ core library
-- `ratelimit` — optional shared C++ library
-- `ratelimit_c` — shared C-compatible library
-- `rl_cli` — command-line example
-- `rl_tests` — GoogleTest test executable
-- `rl_bench` — optional Google Benchmark executable
+* `ratelimit_core` — static C++ core library
+* `ratelimit` — optional shared C++ library
+* `ratelimit_c` — shared C-compatible library
+* `rl_cli` — command-line example
+* `rl_tests` — GoogleTest test executable
+* `rl_bench` — optional Google Benchmark executable
 
 > JNI is enabled by default in the current CMake configuration. Use `-DRL_BUILD_JNI=OFF` if Java/JNI is not installed.
 
@@ -241,7 +259,7 @@ The build produces the following primary targets:
 
 After building:
 
-```bash
+```Shell
 ./build/rl_cli
 ```
 
@@ -259,13 +277,13 @@ user-1 -> allowed=yes remaining=8 reset_ms=0
 
 You can also pipe input into the CLI:
 
-```bash
+```Shell
 printf "user-1\nuser-1\nuser-1\n" | ./build/rl_cli
 ```
 
 On Windows, use the generated executable path:
 
-```powershell
+```PowerShell
 build\rl_cli.exe
 ```
 
@@ -275,19 +293,23 @@ Tests are enabled by default.
 
 Run the test suite through CTest:
 
-```bash
+```Shell
 ctest --test-dir build --output-on-failure
 ```
 
 The tests cover:
 
-- Initial bucket capacity
-- Denial after tokens are exhausted
-- Token refill over time
-- Isolation between different keys
-- Zero-capacity behavior
-- Reset-time calculations
-- Deterministic clock-based testing
+* Initial bucket capacity, bursts, and denial after tokens are exhausted
+* Exact token refill over time, including rates that are not a whole number of nanoseconds per token
+* Reset-time calculations and rounding
+* Zero, very large, and clamped capacities; zero and huge refill rates; overflow
+* Clocks going backwards and limits changing between calls
+* Isolation between different keys, key lengths, empty keys, and embedded NULs
+* Table growth, `clear()`, and `evict_idle()`
+* Concurrency: exact grant counts and no lost or duplicated refills under contention
+* Deterministic clock-based testing
+
+Run the tests under sanitizers with `-DRL_ENABLE_ASAN=ON` (AddressSanitizer + UndefinedBehaviorSanitizer) or `-DRL_ENABLE_TSAN=ON` (ThreadSanitizer).
 
 GoogleTest is downloaded automatically by CMake through `FetchContent` when tests are enabled.
 
@@ -297,20 +319,25 @@ Benchmarks are enabled by default.
 
 Build the benchmark target:
 
-```bash
+```Shell
 cmake --build build --target rl_bench
 ```
 
 Run it:
 
-```bash
+```Shell
 ./build/rl_bench
 ```
 
-The benchmark suite measures:
+The benchmark suite measures, at 1 to 16 threads:
 
-- Requests across many uniformly distributed keys
-- Repeated requests against a single hot key
+* `Hot_Allowed` / `Hot_Denied`: one key shared by all threads (worst-case contention)
+* `Uniform_Allowed` / `Uniform_Denied`: 100k or 1M pre-inserted keys
+* `UniformLong_Allowed`: 100k pre-inserted keys longer than 64 bytes
+* `NewKeys`: every call inserts a previously unseen key
+* `MemoryPerKey`: heap bytes per tracked key (glibc only)
+
+Setup (key generation, pre-insertion) is excluded from timing, and the real `SteadyClock` is used. For multi-threaded runs, read the `total_ops/s` counter: Google Benchmark sums wall time across threads, so its `Time` column is per-thread latency per call.
 
 Benchmark results depend on the compiler, CPU, operating system, build configuration, and workload. Use Release builds when comparing performance.
 
@@ -318,17 +345,20 @@ Benchmark results depend on the compiler, CPU, operating system, build configura
 
 The project supports the following configuration options:
 
-| Option | Default | Description |
-|---|---:|---|
-| `RL_BUILD_SHARED` | `ON` | Build the shared C++ library |
-| `RL_BUILD_TESTS` | `ON` | Build GoogleTest tests |
-| `RL_BUILD_BENCH` | `ON` | Build Google Benchmark tests |
-| `RL_BUILD_JNI` | `ON` | Build Java/JNI bindings |
-| `RL_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer flags where supported |
+| Option            | Default | Description                                          |
+| ----------------- | ------: | ---------------------------------------------------- |
+| `RL_BUILD_SHARED` |    `ON` | Build the shared C++ library                         |
+| `RL_BUILD_TESTS`  |    `ON` | Build GoogleTest tests                               |
+| `RL_BUILD_BENCH`  |    `ON` | Build Google Benchmark tests                         |
+| `RL_BUILD_JNI`    |    `ON` | Build Java/JNI bindings                              |
+| `RL_ENABLE_TSAN`  |   `OFF` | Enable ThreadSanitizer flags where supported         |
+| `RL_ENABLE_ASAN`  |   `OFF` | Enable AddressSanitizer + UndefinedBehaviorSanitizer |
+
+If `CMAKE_BUILD_TYPE` is not set, single-configuration generators default to `Release`.
 
 Example minimal build:
 
-```bash
+```Shell
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DRL_BUILD_SHARED=OFF \
@@ -339,7 +369,7 @@ cmake -S . -B build -G Ninja \
 
 Example development build with tests and benchmarks:
 
-```bash
+```Shell
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DRL_BUILD_TESTS=ON \
@@ -351,7 +381,7 @@ cmake -S . -B build -G Ninja \
 
 Install the headers and libraries to a custom prefix:
 
-```bash
+```Shell
 cmake --install build --prefix ./install
 ```
 
@@ -369,7 +399,7 @@ install/
 
 After installing the library, point `CMAKE_PREFIX_PATH` at the installation directory:
 
-```bash
+```Shell
 cmake -S consumer -B consumer-build -G Ninja \
   -DCMAKE_PREFIX_PATH="$PWD/install"
 
@@ -378,7 +408,7 @@ cmake --build consumer-build
 
 A consuming project's `CMakeLists.txt` can use:
 
-```cmake
+```CMake
 cmake_minimum_required(VERSION 3.16)
 
 project(example LANGUAGES CXX)
@@ -397,7 +427,7 @@ target_link_libraries(example
 
 For the shared C++ library:
 
-```cmake
+```CMake
 target_link_libraries(example
     PRIVATE Ratelimit::ratelimit
 )
@@ -411,11 +441,13 @@ The repository includes a sample consumer project in `consumer/`.
 
 The implementation:
 
-- Splits key storage across multiple shards
-- Uses locks at the shard level
-- Uses shared and exclusive locking where appropriate
-- Keeps operations for unrelated keys independent
-- Supports concurrent calls to `allow()`
+* Splits key storage across multiple shards
+* Makes each decision (lookup, refill, consume) atomically under a short per-shard lock, so decisions for a key are linearizable and no refill or consumption is ever lost
+* Reads the clock and hashes the key before taking the lock, and prefetches the key's slot so its cache miss overlaps lock acquisition
+* Keeps operations for unrelated keys independent
+* Supports concurrent calls to `allow()`, `size()`, `clear()`, and `evict_idle()`
+
+The per-shard lock is a test-and-test-and-set spinlock that yields to the scheduler if it spins for long. Critical sections are a few dozen instructions. In benchmarks the spinlock was as fast as or faster than `std::mutex` at every thread count tested (1 to 16 threads on 8 hardware threads), and up to 2.7× faster on a contended hot key.
 
 The number of shards can be adjusted through `RateLimiterInProc::Config`.
 
@@ -425,30 +457,30 @@ More shards may reduce contention for workloads with many concurrent keys, while
 
 ### Sharded storage
 
-Keys are distributed across shards using a hash function. Each shard maintains its own bucket map and synchronization primitive.
+Each key is hashed once. The high bits of the hash pick a shard and the low bits a slot within it. Each shard is a linear-probing hash table (maximum load factor 3/4) with its own lock, so contention stays low compared with one global lock.
 
-This reduces contention compared with protecting the entire key space with one global lock.
+Each 48-byte slot stores the full hash, the bucket state, and the key. Keys up to 20 bytes are stored inline; longer keys use one exact-size heap block. Lookups never allocate. Inserting a key allocates only if the key is longer than 20 bytes or the table has to grow.
 
 ### Token-bucket rate limiting
 
 Each key has a bucket with:
 
-- A maximum capacity
-- A current token count
-- A refill rate
-- A timestamp used to calculate elapsed time
+* A maximum capacity
+* A current token count
+* A refill rate
+* A timestamp used to calculate elapsed time
 
 Requests consume one token when allowed. Tokens accumulate over time up to the configured capacity.
 
-### Fixed-point arithmetic
+### Exact integer arithmetic
 
-The implementation uses fixed-point arithmetic internally to represent fractional token values while avoiding floating-point rounding problems during refill calculations.
+Balances are kept in nanotokens (10^-9 tokens). Refilling for `dt` nanoseconds at `refill_per_sec` tokens per second then adds exactly `dt * refill_per_sec` nanotokens. That is one 64-bit multiply with an overflow check: no division, no floating point, and no rounding error accumulating across calls. Long idle periods and huge rates saturate at capacity instead of overflowing.
 
 ### Injectable clock
 
 The limiter accepts an optional clock abstraction, making time-dependent behavior deterministic and easy to test.
 
-```cpp
+```C++
 class FakeClock : public rl::Clock {
 public:
     uint64_t time_ns = 0;
@@ -499,15 +531,15 @@ ratelimit-cpp/
 
 This library can be used for:
 
-- API request throttling
-- Per-user request limits
-- Per-IP connection limits
-- Login attempt protection
-- Background job throttling
-- In-process service protection
-- Resource consumption limits
-- C and C++ server applications
-- Java applications through the optional JNI bridge
+* API request throttling
+* Per-user request limits
+* Per-IP connection limits
+* Login attempt protection
+* Background job throttling
+* In-process service protection
+* Resource consumption limits
+* C and C++ server applications
+* Java applications through the optional JNI bridge
 
 ## Scope and Limitations
 
@@ -515,11 +547,11 @@ This is an **in-process** rate limiter.
 
 That means:
 
-- State exists only inside the current process.
-- Multiple processes do not share buckets.
-- Multiple machines do not share limits.
-- Restarting the process clears all in-memory buckets.
-- It is not a distributed replacement for Redis or another shared datastore.
+* State exists only inside the current process.
+* Multiple processes do not share buckets.
+* Multiple machines do not share limits.
+* Restarting the process clears all in-memory buckets.
+* It is not a distributed replacement for Redis or another shared datastore.
 
 For distributed rate limiting across multiple service instances, use a shared external store or coordinate limits at the gateway layer.
 
@@ -527,7 +559,7 @@ For distributed rate limiting across multiple service instances, use a shared ex
 
 After installation, downstream CMake projects can link against:
 
-```cmake
+```CMake
 Ratelimit::ratelimit_core
 Ratelimit::ratelimit
 ```
@@ -536,7 +568,7 @@ The C library is provided through the `ratelimit_c` target.
 
 The project also installs a `ratelimit.pc` file for pkg-config-based workflows:
 
-```bash
+```Shell
 export PKG_CONFIG_PATH="$PWD/install/lib/pkgconfig:$PKG_CONFIG_PATH"
 pkg-config --cflags --libs ratelimit
 ```
@@ -545,6 +577,6 @@ pkg-config --cflags --libs ratelimit
 
 This project is released under the MIT License. See [`LICENSE`](LICENSE) for details.
 
----
+***
 
 Built with C++20, CMake, GoogleTest, and Google Benchmark.

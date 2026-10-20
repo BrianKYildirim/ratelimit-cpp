@@ -47,6 +47,15 @@ extern "C" RL_API rl_decision_t rl_allow(void* handle, const char* key, rl_limit
     }
 }
 
+extern "C" RL_API uint64_t rl_evict_idle(void* handle, uint64_t idle_ns) {
+    if (!handle) return 0;
+    try {
+        return static_cast<RateLimiterInProc*>(handle)->evict_idle(idle_ns);
+    } catch (...) {
+        return 0;
+    }
+}
+
 extern "C" RL_API void rl_free(void* handle) {
     try {
         auto* rlptr = static_cast<RateLimiterInProc*>(handle);

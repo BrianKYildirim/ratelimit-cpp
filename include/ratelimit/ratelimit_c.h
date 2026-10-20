@@ -24,6 +24,8 @@ typedef struct {
 RL_API void*        rl_new_inproc(unsigned shards, unsigned capacity_hint_per_shard);
 RL_API rl_decision_t rl_allow(void* handle, const char* key, rl_limit_t limit);
 RL_API void         rl_free(void* handle);
+// Forgets keys idle for at least idle_ns; returns how many were removed.
+RL_API uint64_t     rl_evict_idle(void* handle, uint64_t idle_ns);
 
 #ifdef __cplusplus
 }

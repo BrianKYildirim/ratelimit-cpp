@@ -21,3 +21,19 @@ jobs:
         run: cmake --build build -j 4
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    strategy:
+      matrix:
+        sanitizer: [ASAN, TSAN]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup CMake
+        uses: lukka/get-cmake@v3.29.2
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRL_ENABLE_${{ matrix.sanitizer }}=ON -DRL_BUILD_BENCH=OFF -DRL_BUILD_JNI=OFF
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

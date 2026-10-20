@@ -8,11 +8,27 @@ option(RL_BUILD_SHARED "Build shared library" ON)
 option(RL_BUILD_TESTS  "Build tests" ON)
 option(RL_BUILD_BENCH  "Build benchmarks" ON)
 option(RL_ENABLE_TSAN  "Enable TSAN in a job (for CI)" OFF)
+option(RL_ENABLE_ASAN  "Enable ASan + UBSan" OFF)
 option(RL_BUILD_JNI    "Build JNI bindings" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Default to an optimized build; an unset build type means no optimization.
+if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# ---------- Sanitizers (must precede target definitions) ----------
+if (RL_ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread)
+  add_link_options(-fsanitize=thread)
+endif()
+if (RL_ENABLE_ASAN)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+  add_link_options(-fsanitize=address,undefined)
+endif()
 
 # ---------- Version / Git info (for version.h) ----------
 set(RL_VERSION_MAJOR 0 CACHE STRING "Major version")
@@ -57,8 +73,6 @@ add_library(ratelimit_core STATIC
   src/inproc_rate_limiter.cpp
 )
 
-target_compile_definitions(ratelimit_core PRIVATE RL_FP_SCALE=4294967296ULL) # 2^32
-
 target_include_directories(ratelimit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${RL_GEN_DIR}>
@@ -73,7 +87,7 @@ if (RL_BUILD_SHARED)
   add_library(ratelimit SHARED
     src/inproc_rate_limiter.cpp
   )
-  target_compile_definitions(ratelimit PRIVATE RL_FP_SCALE=4294967296ULL RL_EXPORTS)
+  target_compile_definitions(ratelimit PRIVATE RL_EXPORTS)
   target_include_directories(ratelimit PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${RL_GEN_DIR}>
@@ -249,9 +263,3 @@ install(EXPORT ratelimitTargets
   NAMESPACE Ratelimit::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ratelimit
 )
-
-# ---------- CI helper flag ----------
-if (RL_ENABLE_TSAN)
-  add_compile_options(-fsanitize=thread)
-  add_link_options(-fsanitize=thread)
-endif()
