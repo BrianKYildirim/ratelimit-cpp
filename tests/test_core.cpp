@@ -1,7 +1,12 @@
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <limits>
+#include <map>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -233,6 +238,51 @@ TEST(Core, ClockGoingBackwardsAddsNoTokens) {
     EXPECT_TRUE(rl.allow("k", lim).allowed);
 }
 
+// Denials within 1 ms of a key's recorded time are not recorded (so hot
+// over-limit keys can be denied without writes), but a key that keeps being
+// denied is still recorded at least every millisecond.
+TEST(Core, ContinuouslyDeniedKeyStaysRecent) {
+    FakeClock fc;
+    rl::RateLimiterInProc rl({}, &fc);
+    const rl::Limit lim{1, 0};
+    EXPECT_TRUE(rl.allow("k", lim).allowed);
+    for (int i = 0; i < 40; ++i) {
+        fc.advance_ns(kMs / 4);
+        EXPECT_FALSE(rl.allow("k", lim).allowed);
+    }
+    EXPECT_EQ(rl.evict_idle(2 * kMs), 0u); // last recorded within the last millisecond
+    fc.advance_ns(2 * kMs);
+    EXPECT_EQ(rl.evict_idle(2 * kMs), 1u);
+}
+
+TEST(Core, QuietDenialsDoNotChangeLaterVerdicts) {
+    // A token every ~1.5 ms, probed every 0.1 ms: most denials are not
+    // recorded, yet no refill is lost or duplicated. Capacity 2 keeps the
+    // balance below capacity, so no refill is clipped either.
+    FakeClock fc;
+    rl::RateLimiterInProc rl({}, &fc);
+    const rl::Limit lim{2, 666}; // 1501501.5 ns per token
+    EXPECT_TRUE(rl.allow("k", lim).allowed);
+    uint64_t grants = 0;
+    for (int i = 0; i < 100'000; ++i) {
+        fc.advance_ns(100'000);
+        grants += rl.allow("k", lim).allowed;
+    }
+    EXPECT_EQ(grants, 1u + 10 * 666); // 1 left over + 10 s at 666 tokens/s
+    // Remaining fraction: exact, so a token arrives exactly when 1e9 nanotokens accumulate.
+    rl::RateLimiterInProc rl2({}, &fc);
+    EXPECT_TRUE(rl2.allow("k", {1, 3}).allowed);
+    const uint64_t start = fc.t;
+    while (fc.t - start < 333'333'333 - 50'000) {
+        fc.advance_ns(50'000);
+        ASSERT_FALSE(rl2.try_acquire("k", {1, 3}));
+    }
+    fc.t = start + 333'333'333;
+    EXPECT_FALSE(rl2.try_acquire("k", {1, 3})); // 999'999'999 nanotokens
+    fc.t += 1;
+    EXPECT_TRUE(rl2.try_acquire("k", {1, 3}));
+}
+
 TEST(Core, LoweringCapacityClampsBalance) {
     FakeClock fc;
     rl::RateLimiterInProc rl({}, &fc);
@@ -414,4 +464,329 @@ TEST(Concurrency, ManyKeysWithConcurrentInsertsAndEviction) {
     evictor.join();
     EXPECT_EQ(rl.size(), static_cast<size_t>(keys));
     for (int k = 0; k < keys; ++k) ASSERT_EQ(granted[k].load(), static_cast<int>(cap)) << k;
+}
+
+// ---------- Fast paths ----------
+
+TEST(Api, TryAcquireMakesTheSameDecisionAsAllow) {
+    FakeClock fc;
+    rl::RateLimiterInProc a({}, &fc), b({}, &fc);
+    const rl::Limit lim{3, 2};
+    for (int i = 0; i < 2000; ++i) {
+        fc.advance_ns((i * 7919) % 400 * kMs);
+        const std::string key = "k" + std::to_string(i % 5);
+        ASSERT_EQ(a.allow(key, lim).allowed, b.try_acquire(key, lim)) << i;
+    }
+}
+
+TEST(Api, CallerSuppliedTimestamps) {
+    FakeClock fc;
+    fc.t = 50 * kSec;
+    rl::RateLimiterInProc rl({}, &fc);
+    EXPECT_EQ(rl.now_ns(), 50 * kSec);
+    const rl::Limit lim{1, 1};
+    const uint64_t t = rl.now_ns();
+    EXPECT_TRUE(rl.try_acquire("k", lim, t));
+    EXPECT_FALSE(rl.try_acquire("k", lim, t + kSec - 1));
+    EXPECT_FALSE(rl.try_acquire("k", lim, t)); // earlier than the last call: no refill
+    auto d = rl.allow("k", lim, t + kSec - 1);
+    EXPECT_FALSE(d.allowed);
+    EXPECT_EQ(d.reset_ms, 1u);
+    EXPECT_TRUE(rl.allow("k", lim, t + kSec).allowed);
+    // The limiter's own clock is not consulted by these calls.
+    EXPECT_FALSE(rl.allow("k", lim).allowed);
+}
+
+// ---------- Differential test against an independent model ----------
+
+// The token-bucket semantics written separately from the engine: a std::map
+// and 128-bit arithmetic instead of overflow checks. A denial within 1 ms of
+// the key's recorded time leaves the key unchanged (unless a lowered capacity
+// clamps its balance).
+struct ModelLimiter {
+    static constexpr uint64_t kUnit = 1'000'000'000;
+    static constexpr uint64_t kQuietNs = 1'000'000;
+    struct Bucket {
+        uint64_t tokens, last;
+    };
+    std::map<std::string, Bucket> buckets;
+
+    rl::Decision allow(const std::string& key, rl::Limit lim, uint64_t now) {
+        using u128 = unsigned __int128;
+        const uint64_t cap = std::min<uint64_t>(lim.capacity, std::numeric_limits<uint64_t>::max() / kUnit) * kUnit;
+        auto it = buckets.find(key);
+        if (it == buckets.end()) it = buckets.emplace(key, Bucket{cap, now}).first;
+        Bucket& b = it->second;
+        uint64_t tokens = std::min(b.tokens, cap);
+        const uint64_t at = std::max(b.last, now);
+        if (now > b.last) {
+            const u128 add = u128(now - b.last) * lim.refill_per_sec;
+            tokens = add >= cap - tokens ? cap : tokens + uint64_t(add);
+        }
+        if (tokens >= kUnit) {
+            b.tokens = tokens - kUnit;
+            b.last = at;
+            return {true, b.tokens / kUnit, 0};
+        }
+        if (b.tokens > cap || at - b.last >= kQuietNs) {
+            b.tokens = tokens;
+            b.last = at;
+        }
+        if (lim.refill_per_sec == 0 || cap < kUnit) return {false, 0, 0};
+        const u128 per_ms = u128(lim.refill_per_sec) * 1'000'000;
+        if (per_ms > std::numeric_limits<uint64_t>::max()) return {false, 0, 1};
+        return {false, 0, (kUnit - tokens - 1) / uint64_t(per_ms) + 1};
+    }
+
+    size_t evict_idle(uint64_t idle, uint64_t now) {
+        return std::erase_if(buckets, [&](const auto& kv) { return now >= kv.second.last && now - kv.second.last >= idle; });
+    }
+};
+
+TEST(Differential, MatchesModelOverRandomOperations) {
+    using namespace std::literals;
+    constexpr uint64_t kMax = std::numeric_limits<uint64_t>::max();
+    const std::vector<std::string> keys = {
+        "", "a", "b", "key_1", "key_2", "abcdefgh", std::string("a\0b", 3),
+        std::string(27, 'x'), std::string(28, 'x'), std::string(29, 'x'), std::string(28, 'y'), std::string(29, 'y'),
+        std::string(64, 'z'), std::string(200, 'q'), "tenant:acme/user:42", "tenant:acme/user:43",
+    };
+    const std::vector<rl::Limit> limits = {
+        {0, 0}, {1, 0}, {1, 1}, {2, 3}, {5, 10}, {10, 1000}, {3, kMax}, {kMax, 1}, {1000, 1'000'000},
+        {1, 3'000'000}, {kMax / 1'000'000'000, 7}, {7, 0}, {100, 1},
+    };
+    for (uint64_t seed = 1; seed <= 12; ++seed) {
+        std::mt19937_64 rng(seed);
+        auto pick = [&](uint64_t n) { return static_cast<size_t>(rng() % n); };
+        FakeClock fc;
+        fc.t = 1'000'000 * kSec;
+        // Tiny shard counts and tables force frequent growth and rebuilds.
+        rl::RateLimiterInProc rl({size_t{1} << pick(3), pick(3)}, &fc);
+        ModelLimiter model;
+        for (int op = 0; op < 20'000; ++op) {
+            switch (pick(6)) { // advance the clock
+            case 0: case 1: break;
+            case 2: fc.t += rng() % 1000; break;
+            case 3: fc.t += rng() % (200 * kMs); break;
+            case 4: fc.t += rng() % (20 * kSec); break;
+            default: fc.t -= std::min<uint64_t>(fc.t, rng() % kSec); break; // backwards
+            }
+            const std::string& key = keys[pick(keys.size())];
+            const rl::Limit lim = limits[pick(limits.size())];
+            const unsigned kind = static_cast<unsigned>(pick(100));
+            if (kind < 50) {
+                const rl::Decision want = model.allow(key, lim, fc.t);
+                const rl::Decision got = rl.allow(key, lim);
+                ASSERT_EQ(got.allowed, want.allowed) << "seed " << seed << " op " << op;
+                ASSERT_EQ(got.remaining, want.remaining) << "seed " << seed << " op " << op;
+                ASSERT_EQ(got.reset_ms, want.reset_ms) << "seed " << seed << " op " << op;
+            } else if (kind < 75) {
+                ASSERT_EQ(rl.try_acquire(key, lim), model.allow(key, lim, fc.t).allowed) << "seed " << seed << " op " << op;
+            } else if (kind < 90) {
+                const uint64_t at = fc.t + rng() % (2 * kSec) - kSec; // around the clock, either side
+                if (kind & 1) {
+                    ASSERT_EQ(rl.try_acquire(key, lim, at), model.allow(key, lim, at).allowed) << "seed " << seed;
+                } else {
+                    const rl::Decision want = model.allow(key, lim, at);
+                    const rl::Decision got = rl.allow(key, lim, at);
+                    ASSERT_EQ(got.allowed, want.allowed) << "seed " << seed << " op " << op;
+                    ASSERT_EQ(got.remaining, want.remaining) << "seed " << seed << " op " << op;
+                    ASSERT_EQ(got.reset_ms, want.reset_ms) << "seed " << seed << " op " << op;
+                }
+            } else if (kind < 96) {
+                ASSERT_EQ(rl.size(), model.buckets.size()) << "seed " << seed << " op " << op;
+            } else if (kind < 99) {
+                const uint64_t idle = rng() % (30 * kSec);
+                ASSERT_EQ(rl.evict_idle(idle), model.evict_idle(idle, fc.t)) << "seed " << seed << " op " << op;
+            } else {
+                rl.clear();
+                model.buckets.clear();
+            }
+        }
+        ASSERT_EQ(rl.size(), model.buckets.size());
+    }
+}
+
+// ---------- Concurrency: structural changes under load ----------
+
+// Thread-safe clock the test sets explicitly.
+struct SharedClock : rl::Clock {
+    std::atomic<uint64_t> t{0};
+    uint64_t now_ns() const noexcept override { return t.load(std::memory_order_relaxed); }
+};
+
+TEST(Concurrency, TryAcquireHotKeyGrantsExactlyCapacity) {
+    rl::RateLimiterInProc rl;
+    const uint64_t cap = 20'000;
+    std::atomic<uint64_t> allowed{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 8; ++t) {
+        ts.emplace_back([&] {
+            uint64_t mine = 0;
+            for (int i = 0; i < 10'000; ++i) mine += rl.try_acquire("hot", {cap, 0});
+            allowed += mine;
+        });
+    }
+    for (auto& t : ts) t.join();
+    EXPECT_EQ(allowed.load(), cap);
+}
+
+// Counted keys must grant exactly their capacity while other threads insert
+// enough keys to make every shard's table grow several times.
+TEST(Concurrency, GrowthLosesNoUpdates) {
+    rl::RateLimiterInProc rl({4, 1});
+    const int counted = 64, threads = 8, inserts_per_thread = 20'000;
+    const uint64_t cap = 500;
+    std::vector<std::atomic<uint64_t>> granted(counted);
+    std::vector<std::thread> ts;
+    for (int t = 0; t < threads; ++t) {
+        ts.emplace_back([&, t] {
+            for (int i = 0; i < inserts_per_thread; ++i) {
+                (void)rl.try_acquire("fill-" + std::to_string(t) + "-" + std::to_string(i), {1, 0});
+                const int k = (i * 13 + t) % counted;
+                if (rl.try_acquire("counted-" + std::to_string(k), {cap, 0})) granted[k]++;
+            }
+        });
+    }
+    for (auto& t : ts) t.join();
+    EXPECT_EQ(rl.size(), static_cast<size_t>(counted + threads * inserts_per_thread));
+    // Each counted key was asked threads * inserts / counted = 2500 > cap times.
+    for (int k = 0; k < counted; ++k) ASSERT_EQ(granted[k].load(), cap) << k;
+}
+
+// Live keys (always used at the current time) must never be evicted or lose
+// updates while an evictor keeps rebuilding tables to drop stale keys that
+// other threads keep inserting with an old timestamp.
+TEST(Concurrency, EvictionDuringTrafficKeepsLiveKeys) {
+    SharedClock clk;
+    clk.t = 100 * kSec;
+    rl::RateLimiterInProc rl({4, 1}, &clk);
+    const int live = 200, threads = 6, rounds = 30;
+    const uint64_t cap = 40;
+    std::vector<std::atomic<uint64_t>> granted(live);
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> evicted{0};
+    std::thread evictor([&] {
+        while (!stop.load()) evicted += rl.evict_idle(50 * kSec);
+    });
+    std::thread stale([&] { // keys last seen at t = 0, so always evictable
+        for (int i = 0; !stop.load(); ++i) (void)rl.allow("stale-" + std::to_string(i % 5000), {1, 0}, 0);
+    });
+    std::vector<std::thread> ts;
+    for (int t = 0; t < threads; ++t) {
+        ts.emplace_back([&, t] {
+            for (int r = 0; r < rounds; ++r)
+                for (int i = 0; i < live; ++i) {
+                    const int k = (i + t * 31) % live;
+                    if (rl.try_acquire("live-" + std::to_string(k), {cap, 0})) granted[k]++;
+                }
+        });
+    }
+    for (auto& t : ts) t.join();
+    stop = true;
+    evictor.join();
+    stale.join();
+    EXPECT_GT(evicted.load(), 0u);
+    for (int k = 0; k < live; ++k) ASSERT_EQ(granted[k].load(), cap) << k; // asked 180 times each
+    rl.evict_idle(50 * kSec);
+    EXPECT_EQ(rl.size(), static_cast<size_t>(live));
+}
+
+TEST(Concurrency, ClearDuringTraffic) {
+    rl::RateLimiterInProc rl({8, 2});
+    std::atomic<bool> stop{false};
+    std::thread clearer([&] {
+        while (!stop.load()) {
+            rl.clear();
+            std::this_thread::yield();
+        }
+    });
+    std::vector<std::thread> ts;
+    std::atomic<uint64_t> calls{0};
+    for (int t = 0; t < 6; ++t) {
+        ts.emplace_back([&, t] {
+            std::string long_prefix(40, 'L'); // heap-allocated keys too
+            for (int i = 0; i < 30'000; ++i) {
+                const std::string key = (i & 1 ? long_prefix : std::string()) + std::to_string((i * 7 + t) % 3000);
+                (void)rl.allow(key, {2, 1});
+                ++calls;
+            }
+        });
+    }
+    for (auto& t : ts) t.join();
+    stop = true;
+    clearer.join();
+    EXPECT_EQ(calls.load(), 6u * 30'000u);
+    rl.clear();
+    EXPECT_EQ(rl.size(), 0u);
+    EXPECT_TRUE(rl.allow("after", {1, 0}).allowed);
+    EXPECT_FALSE(rl.allow("after", {1, 0}).allowed);
+}
+
+// Many short-lived threads, each using several limiters, then the limiters go away.
+TEST(Concurrency, ShortLivedThreadsAndLimiters) {
+    for (int round = 0; round < 20; ++round) {
+        auto a = std::make_unique<rl::RateLimiterInProc>(rl::RateLimiterInProc::Config{2, 1});
+        rl::RateLimiterInProc b({2, 1});
+        std::vector<std::thread> ts;
+        for (int t = 0; t < 8; ++t) {
+            ts.emplace_back([&, t] {
+                for (int i = 0; i < 300; ++i) {
+                    (void)a->allow("k" + std::to_string(i + t * 1000), {1, 1});
+                    (void)b.try_acquire("k" + std::to_string(i), {1, 1});
+                }
+            });
+        }
+        for (auto& t : ts) t.join();
+        EXPECT_EQ(a->size(), 8u * 300u);
+        EXPECT_EQ(b.size(), 300u);
+        a.reset();
+    }
+}
+
+// ---------- FastClock ----------
+
+TEST(FastClock, TracksSteadyClock) {
+    rl::FastClock fast;
+    rl::SteadyClock steady;
+    std::printf("FastClock uses the TSC: %s\n", rl::FastClock::uses_tsc() ? "yes" : "no");
+    const uint64_t f0 = fast.now_ns(), s0 = steady.now_ns();
+    uint64_t prev = f0, worst_step_back = 0;
+    // Long enough to cross a few re-anchors.
+    for (auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(1300);
+         std::chrono::steady_clock::now() < end;) {
+        for (int i = 0; i < 1000; ++i) {
+            const uint64_t t = fast.now_ns();
+            if (t < prev) worst_step_back = std::max(worst_step_back, prev - t);
+            prev = t;
+        }
+    }
+    const uint64_t f1 = fast.now_ns(), s1 = steady.now_ns();
+    const double ratio = static_cast<double>(f1 - f0) / static_cast<double>(s1 - s0);
+    EXPECT_NEAR(ratio, 1.0, 1e-3);
+    EXPECT_LT(f1 > s1 ? f1 - s1 : s1 - f1, 2 * kMs); // same time base as steady_clock
+    EXPECT_LT(worst_step_back, 100'000u);            // re-anchoring may step back a few microseconds
+}
+
+TEST(FastClock, ConcurrentReadersSeeConsistentTime) {
+    rl::FastClock fast;
+    std::atomic<uint64_t> worst{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 8; ++t) {
+        ts.emplace_back([&] {
+            uint64_t prev = fast.now_ns(), mine = 0;
+            for (auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(1100);
+                 std::chrono::steady_clock::now() < end;) {
+                for (int i = 0; i < 1000; ++i) {
+                    const uint64_t t = fast.now_ns();
+                    if (t < prev) mine = std::max(mine, prev - t);
+                    prev = t;
+                }
+            }
+            uint64_t w = worst.load();
+            while (mine > w && !worst.compare_exchange_weak(w, mine)) {}
+        });
+    }
+    for (auto& t : ts) t.join();
+    EXPECT_LT(worst.load(), 100'000u);
 }

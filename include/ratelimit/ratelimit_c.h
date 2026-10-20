@@ -23,6 +23,8 @@ typedef struct {
 // C wrapper for the in-process rate limiter
 RL_API void*        rl_new_inproc(unsigned shards, unsigned capacity_hint_per_shard);
 RL_API rl_decision_t rl_allow(void* handle, const char* key, rl_limit_t limit);
+// Same decision as rl_allow, without computing remaining/reset_ms: 1 if allowed, else 0.
+RL_API int          rl_try_acquire(void* handle, const char* key, rl_limit_t limit);
 RL_API void         rl_free(void* handle);
 // Forgets keys idle for at least idle_ns; returns how many were removed.
 RL_API uint64_t     rl_evict_idle(void* handle, uint64_t idle_ns);

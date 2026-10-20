@@ -9,7 +9,9 @@
   #else
     #define RL_API __declspec(dllimport)
   #endif
+#elif defined(__GNUC__) || defined(__clang__)
+  // The shared libraries build with hidden visibility; this exports the API.
+  #define RL_API __attribute__((visibility("default")))
 #else
-  // Non-Windows, or static build
   #define RL_API
 #endif

@@ -8,7 +8,10 @@ The library provides a sharded implementation designed for concurrent workloads,
 
 * C++20 API
 * Thread-safe, in-process rate limiting with linearizable per-key decisions
-* Sharded open-addressing key storage: one hash and no allocation per lookup
+* Lock-free key lookup; each decision locks only its own key's entry, so different keys never contend
+* Over-limit keys are denied without writing shared memory, so a flood of requests for one key scales across cores
+* Fast default clock: the CPU timestamp counter, re-anchored to `steady_clock` (a few ns per read instead of a system call on WSL1 and some VMs)
+* Admission-only `try_acquire()` and caller-supplied-timestamp variants for hot paths
 * Token-bucket algorithm
 * Exact integer refill arithmetic (no rounding drift)
 * Per-key limits

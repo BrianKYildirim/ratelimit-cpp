@@ -47,6 +47,11 @@ extern "C" RL_API rl_decision_t rl_allow(void* handle, const char* key, rl_limit
     }
 }
 
+extern "C" RL_API int rl_try_acquire(void* handle, const char* key, rl_limit_t limit) {
+    if (!handle || !key) return 0;
+    return static_cast<RateLimiterInProc*>(handle)->try_acquire(key, rl::Limit{limit.capacity, limit.refill_per_sec}) ? 1 : 0;
+}
+
 extern "C" RL_API uint64_t rl_evict_idle(void* handle, uint64_t idle_ns) {
     if (!handle) return 0;
     try {

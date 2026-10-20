@@ -16,7 +16,8 @@ public:
 };
 
 // In-process sharded implementation. Each key's decision is made atomically
-// (linearizable per key) under a short per-shard lock.
+// (linearizable per key) under a short lock on that key's entry; lookups take
+// no shared lock, so operations on different keys do not contend.
 class RL_API RateLimiterInProc final : public RateLimiter {
 public:
     struct Config {
@@ -26,10 +27,27 @@ public:
 
     // Inline delegating ctor so it’s defined (avoids linker errors).
     explicit RateLimiterInProc() : RateLimiterInProc(Config{}, nullptr) {}
+    // `clock` defaults to FastClock and must outlive the limiter.
     explicit RateLimiterInProc(const Config& cfg, const Clock* clock = nullptr);
     ~RateLimiterInProc();
 
     Decision allow(std::string_view key, const Limit& limit) noexcept override;
+
+    // The same decision and state change as allow(), without computing
+    // Decision::remaining and Decision::reset_ms.
+    bool try_acquire(std::string_view key, const Limit& limit) noexcept;
+
+    // As above, at a caller-supplied time instead of reading the clock, e.g.
+    // one now_ns() reading shared by a batch of requests. `now_ns` must come
+    // from this limiter's now_ns(): refills are measured against times stored
+    // from earlier calls, and evict_idle() compares those times to its clock.
+    // A time earlier than a key's last call adds no tokens to it.
+    Decision allow(std::string_view key, const Limit& limit, uint64_t now_ns) noexcept;
+    bool try_acquire(std::string_view key, const Limit& limit, uint64_t now_ns) noexcept;
+
+    // The limiter's clock.
+    uint64_t now_ns() const noexcept;
+
     void clear() override;
     size_t size() const noexcept override;
 
