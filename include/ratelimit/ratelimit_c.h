@@ -29,6 +29,56 @@ RL_API void         rl_free(void* handle);
 // Forgets keys idle for at least idle_ns; returns how many were removed.
 RL_API uint64_t     rl_evict_idle(void* handle, uint64_t idle_ns);
 
+// ---------- Caller-supplied time ----------
+// Times are nanoseconds on the limiter's own clock: take them from
+// rl_now_ns, never from another clock. A time earlier than a key's last
+// recorded call adds no tokens to it.
+
+// The limiter's clock; 0 if handle is NULL.
+RL_API uint64_t      rl_now_ns(void* handle);
+// rl_allow at now_ns instead of the limiter's clock reading, so a decision
+// can be paired with an rl_inspect_at reading taken at exactly that instant.
+RL_API rl_decision_t rl_allow_at(void* handle, const char* key, rl_limit_t limit, uint64_t now_ns);
+
+// ---------- Inspection ----------
+
+// An until_* wait that never ends (refill rate 0, or capacity 0).
+#define RL_NEVER UINT64_MAX
+
+// A key's bucket as read by rl_inspect_at, which documents each field.
+// Nanotokens: 1 token = 1'000'000'000.
+typedef struct {
+    uint8_t  tracked;           // 1 if the limiter holds a bucket for the key
+    uint8_t  would_allow;       // 1 if an rl_allow at that instant would allow (a prediction)
+    uint64_t stored_nanotokens; // stored state; 0 if not tracked
+    uint64_t stored_at_ns;      // stored state; 0 if not tracked
+    uint64_t nanotokens;        // derived: available at that instant
+    uint64_t tokens;            // derived: whole tokens available before a call
+    uint64_t until_token_ns;    // derived: ns until a whole token (rounded up); 0 if one is; RL_NEVER
+    uint64_t until_full_ns;     // derived: ns until full (rounded up); 0 if full; RL_NEVER
+} rl_bucket_state_t;
+
+// Reads key's bucket as rl_allow_at(handle, key, limit, now_ns) would see it,
+// without changing anything: no token is taken, no key is inserted, and no
+// later decision differs. Thread-safe alongside every other function.
+//   tracked == 1: stored_* hold the balance the key's last recorded call
+//     left and that call's time (denials within 1 ms of it are not recorded:
+//     they change nothing, so the derived fields stay exact).
+//   tracked == 0: stored_* are 0, and the derived fields describe the full
+//     bucket a new key starts with, from `limit` alone.
+// Derived fields are computed exactly as rl_allow computes its decision.
+// Waits count from the later of now_ns and stored_at_ns, assuming no other
+// call for the key; when rl_allow_at at now_ns is denied, its reset_ms is
+// until_token_ns / 1e6 rounded up (0 instead of RL_NEVER), and its remaining
+// is tokens - would_allow. One key's reading is a state the key had between
+// decisions; readings of different keys are not one atomic view, and
+// would_allow is not a reservation: another thread may take the token first.
+// Keys are NUL-terminated, as in rl_allow: bytes after an embedded NUL are
+// not part of the key. All fields are 0 if handle or key is NULL.
+RL_API rl_bucket_state_t rl_inspect_at(void* handle, const char* key, rl_limit_t limit, uint64_t now_ns);
+// rl_inspect_at at the limiter's clock (rl_now_ns).
+RL_API rl_bucket_state_t rl_inspect(void* handle, const char* key, rl_limit_t limit);
+
 #ifdef __cplusplus
 }
 #endif

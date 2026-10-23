@@ -1,0 +1,10 @@
+prefix=@RL_PC_PREFIX@
+exec_prefix=${prefix}
+libdir=@RL_PC_LIBDIR@
+includedir=@RL_PC_INCLUDEDIR@
+
+Name: ratelimit_c
+Description: In-process token-bucket rate limiter, C API (shared library)
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lratelimit_c
+Cflags: -I${includedir}
