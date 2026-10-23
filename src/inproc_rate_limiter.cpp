@@ -480,10 +480,11 @@ private:
 
 // ---------- Token bucket ----------
 
-// Result policies: Full computes allow()'s Decision, Admit only the verdict.
+// Result policies: Full computes allow()'s Decision, Admit only the verdict,
+// Peek (for inspect()) the bucket a call would see.
 struct Full {
     using Result = Decision;
-    static Decision allowed(uint64_t tokens) noexcept { return {true, tokens / kUnit, 0}; }
+    static Decision allowed(uint64_t tokens, uint64_t, uint64_t) noexcept { return {true, tokens / kUnit, 0}; }
     static Decision denied(uint64_t tokens, uint64_t cap, uint64_t rate) noexcept {
         // Never: no refill, or the bucket cannot hold a whole token.
         if (rate == 0 || cap < kUnit) return {false, 0, 0};
@@ -498,9 +499,37 @@ struct Full {
 
 struct Admit {
     using Result = bool;
-    static bool allowed(uint64_t) noexcept { return true; }
+    static bool allowed(uint64_t, uint64_t, uint64_t) noexcept { return true; }
     static bool denied(uint64_t, uint64_t, uint64_t) noexcept { return false; }
     static bool failed() noexcept { return false; }
+};
+
+// Fills BucketState's derived fields; inspect() adds the stored state.
+struct Peek {
+    using Result = BucketState;
+    // `tokens` is the balance after the call took its token.
+    static BucketState allowed(uint64_t tokens, uint64_t cap, uint64_t rate) noexcept {
+        return derive(tokens + kUnit, cap, rate, true);
+    }
+    static BucketState denied(uint64_t tokens, uint64_t cap, uint64_t rate) noexcept {
+        return derive(tokens, cap, rate, false);
+    }
+
+    static BucketState derive(uint64_t tokens, uint64_t cap, uint64_t rate, bool allowed) noexcept {
+        // Refill adds exactly dt * rate (saturating at cap), so the first
+        // whole ns at which `missing` more nanotokens are in is ceil(missing / rate).
+        auto wait = [rate](uint64_t missing) -> uint64_t {
+            if (missing == 0) return 0;
+            return rate == 0 ? BucketState::kNever : (missing - 1) / rate + 1;
+        };
+        BucketState s{};
+        s.nanotokens = tokens;
+        s.tokens = tokens / kUnit;
+        s.would_allow = allowed;
+        s.until_token_ns = allowed ? 0 : cap < kUnit ? BucketState::kNever : wait(kUnit - tokens);
+        s.until_full_ns = wait(cap - tokens);
+        return s;
+    }
 };
 
 // A denial less than this long after the key's recorded time leaves the key
@@ -529,7 +558,7 @@ RL_INLINE typename Out::Result consume(uint64_t& tokens_io, uint64_t& last, cons
     if (tokens >= kUnit) {
         tokens_io = tokens - kUnit;
         last = at;
-        return Out::allowed(tokens_io);
+        return Out::allowed(tokens_io, cap, rate);
     }
     if (tokens_io > cap || at - last >= kQuietNs) {
         tokens_io = tokens;
@@ -701,6 +730,47 @@ struct RateLimiterInProc::Impl {
         return res;
     }
 
+    // Reads the key's bucket like decide() finds it, but from a snapshot: no
+    // slot lock, no quiet hint and no insert, so no decision can tell.
+    template <class Now>
+    BucketState inspect(std::string_view key, const Limit& limit, Now now) const noexcept {
+        const uint64_t h = hash_key(key, seed);
+        const size_t shard = shard_of(h);
+        prefetch(home_slot(tables[shard].load(std::memory_order_relaxed), h));
+        const uint64_t t_now = now();
+        if (Reader* r = this_reader()) [[likely]] {
+            ReadSection rs(r);
+            const Table t = Table::decode(tables[shard].load(std::memory_order_seq_cst));
+            const Slot* s = t.slots ? t.find(h, key) : nullptr;
+            if (!s) return peek(nullptr, limit, t_now);
+            const Snapshot snap = snapshot(*s);
+            if (snap.valid) [[likely]] return peek(&snap, limit, t_now);
+        }
+        // A table being replaced, or no reader record: as decide() does, wait
+        // for the change under the shard mutex. Sealing takes the mutex, so
+        // the snapshot is valid here; it still never writes the slot.
+        std::lock_guard lk(writers[shard].mu);
+        const Table t = table(shard);
+        const Slot* s = t.slots ? t.find(h, key) : nullptr;
+        if (!s) return peek(nullptr, limit, t_now);
+        const Snapshot snap = snapshot(*s);
+        return peek(&snap, limit, t_now);
+    }
+
+    // The bucket a call at `now` would see: consume() on a copy of the
+    // snapshot, or for an untracked key (null) of a new key's full bucket.
+    static BucketState peek(const Snapshot* snap, const Limit& limit, uint64_t now) noexcept {
+        uint64_t tokens = snap ? snap->tokens : std::numeric_limits<uint64_t>::max(); // clamped to capacity
+        uint64_t last = snap ? snap->last : now;
+        BucketState s = consume<Peek>(tokens, last, limit, now);
+        if (snap) {
+            s.tracked = true;
+            s.stored_nanotokens = snap->tokens;
+            s.stored_at_ns = snap->last;
+        }
+        return s;
+    }
+
     // Requires the shard mutex; `t` is the shard's current table and `empty`
     // the empty slot that ended the key's probe in it (or null without a
     // table). Throws std::bad_alloc or std::length_error, leaving the shard
@@ -806,6 +876,14 @@ bool RateLimiterInProc::try_acquire(std::string_view key, const Limit& limit, ui
 }
 
 uint64_t RateLimiterInProc::now_ns() const noexcept { return impl_->now(); }
+
+BucketState RateLimiterInProc::inspect(std::string_view key, const Limit& limit) const noexcept {
+    return impl_->inspect(key, limit, [im = impl_.get()] { return im->now(); });
+}
+
+BucketState RateLimiterInProc::inspect(std::string_view key, const Limit& limit, uint64_t now_ns) const noexcept {
+    return impl_->inspect(key, limit, [now_ns] { return now_ns; });
+}
 
 void RateLimiterInProc::clear() {
     for (size_t i = 0; i <= impl_->shard_mask; ++i) {

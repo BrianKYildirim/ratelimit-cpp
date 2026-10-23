@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -70,7 +71,7 @@ struct Histogram {
 
     void add(uint64_t t) {
         if (t < kLinear) ++linear[t];
-        else ++log2[63 - __builtin_clzll(t)];
+        else ++log2[63 - std::countl_zero(t)];
         max = std::max(max, t);
         ++count;
     }

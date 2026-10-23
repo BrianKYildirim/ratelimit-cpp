@@ -48,6 +48,38 @@ public:
     // The limiter's clock.
     uint64_t now_ns() const noexcept;
 
+    // Reads `key`'s bucket without changing it: takes no token, inserts no
+    // key, and never writes the key's entry, its lock or the per-thread
+    // state decisions keep, so every later decision is the same as without
+    // the call. The derived fields are what allow(key, limit, now_ns) would
+    // compute at that instant, by the same code; see BucketState. `now_ns`
+    // must come from now_ns(), as for allow(); the first overload reads it.
+    //
+    // Consistency: one key's reading is a state the key actually had, as
+    // committed by one of its decisions or by its insert, never a partly
+    // written one. It is linearizable with that key's decisions: it reflects
+    // every decision that happens-before the call and none that starts after
+    // it returns. Readings of different keys are separate snapshots, taken at
+    // different instants, not one atomic view. would_allow is a prediction
+    // for one instant, not a reservation: another thread may take the token
+    // first. Denials within 1 ms of a key's stored time are not recorded
+    // (they change nothing), so stored_at_ns may lag the key's latest call by
+    // up to 1 ms while every derived value stays exact. While the key stays
+    // tracked, stored_at_ns never moves backwards: a call stamped earlier
+    // adds no tokens and leaves it unchanged.
+    //
+    // Thread-safe alongside every other member, including clear(),
+    // evict_idle() and inserts that grow a table. Costs about as much as a
+    // lookup: a hash, a probe and a lock-free read of the key's entry, which
+    // waits only while a decision is writing that key. Only while the key's
+    // table is being replaced (growth, eviction, clear()), or if the thread
+    // cannot register for lock-free reads (out of memory), does it take the
+    // key's shard mutex for the lookup instead, as allow() does then. Reading
+    // a key that other threads write costs each of them a cache miss on its
+    // next write of the key.
+    BucketState inspect(std::string_view key, const Limit& limit) const noexcept;
+    BucketState inspect(std::string_view key, const Limit& limit, uint64_t now_ns) const noexcept;
+
     void clear() override;
     size_t size() const noexcept override;
 

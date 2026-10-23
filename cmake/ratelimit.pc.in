@@ -1,11 +1,10 @@
-
-prefix=@CMAKE_INSTALL_PREFIX@
+prefix=@RL_PC_PREFIX@
 exec_prefix=${prefix}
-libdir=@CMAKE_INSTALL_FULL_LIBDIR@
-includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+libdir=@RL_PC_LIBDIR@
+includedir=@RL_PC_INCLUDEDIR@
 
 Name: ratelimit
-Description: High-performance in-process rate limiter (C/C++)
+Description: In-process token-bucket rate limiter, C++ API (static library)
 Version: @PROJECT_VERSION@
 Libs: -L${libdir} -lratelimit_core
 Cflags: -I${includedir}

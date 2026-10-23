@@ -186,6 +186,7 @@ if (RL_BUILD_BENCH)
   set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
   set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
   set(BENCHMARK_ENABLE_WARNINGS OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE) # keep it out of our install tree
 
   FetchContent_Declare(
     gbm
@@ -257,13 +258,30 @@ configure_file(
   @ONLY
 )
 
-configure_file(
-  cmake/ratelimit.pc.in
-  "${CMAKE_CURRENT_BINARY_DIR}/ratelimit.pc"
-  @ONLY
-)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ratelimit.pc"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+# pkg-config files find the install tree from their own location, so they
+# stay correct with `cmake --install --prefix` and after the tree is moved.
+if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" OR IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+  set(RL_PC_PREFIX "${CMAKE_INSTALL_PREFIX}")
+  set(RL_PC_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
+  set(RL_PC_INCLUDEDIR "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+else()
+  file(RELATIVE_PATH RL_PC_UP "/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "/")
+  string(REGEX REPLACE "/$" "" RL_PC_UP "${RL_PC_UP}")
+  set(RL_PC_PREFIX "\${pcfiledir}/${RL_PC_UP}")
+  set(RL_PC_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
+  set(RL_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+endif()
+
+# ratelimit: the C++ API (static core); ratelimit_c: the C API (shared).
+foreach(pc ratelimit ratelimit_c)
+  configure_file(
+    cmake/${pc}.pc.in
+    "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
+    @ONLY
+  )
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+endforeach()
 
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfig.cmake"

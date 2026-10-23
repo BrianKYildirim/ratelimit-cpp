@@ -21,13 +21,22 @@
 //   Disjoint  each thread owns 10k pre-inserted keys (no sharing), as when
 //             connections or tenants are pinned to worker threads
 //   NewKeys   every call inserts a previously unseen key
+//   Untracked N keys that were never inserted, probed in tables holding
+//             N other keys
 //
 // API variants:
 //   (none)        allow(): full Decision with remaining and reset_ms
 //   TryAcquire_   try_acquire(): verdict only, same state change as allow()
 //   TryAcquireAt_ try_acquire(key, limit, now_ns) with one now_ns() read per
 //                 64 calls, as when a batch of requests shares one timestamp
+//   Inspect_      inspect(): reads the key's bucket without changing it (no
+//                 granted/denied counters)
 //   Clock_        one clock read, for reference
+//
+// BM_Hot_Allowed_Inspected runs allow() on the hot key while extra threads,
+// outside the benchmark's own, inspect it (same_key:1) or an untracked key
+// (same_key:0, the control); compare its wall_ops/s with BM_Hot_Allowed at
+// the same thread count.
 
 #include <benchmark/benchmark.h>
 
@@ -41,6 +50,7 @@
 #include <new>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if defined(__GLIBC__)
@@ -252,6 +262,90 @@ static void BM_NewKeys(benchmark::State& state) {
     state.counters["faults/op"] = benchmark::Counter(thread_page_faults() - faults, benchmark::Counter::kAvgIterations);
 }
 
+// ---------- Inspection ----------
+// Separate from run() and finish(), so the loops above compile exactly as
+// before this benchmark existed.
+
+// Inspects g_keys[i] for i = start, start + 1, ... wrapping at n.
+static void run_inspect(benchmark::State& state, size_t n, size_t start) {
+    const rl::RateLimiterInProc& limiter = *g_rl;
+    const rl::Limit limit = g_limit;
+    const std::string* keys = g_keys.data();
+    size_t i = start;
+    for (auto _ : state) {
+        rl::BucketState s = limiter.inspect(keys[i], limit);
+        benchmark::DoNotOptimize(s);
+        if (++i == n) i = 0;
+    }
+    double wall_rate = 0; // as finish() computes it
+    if (g_finished.fetch_add(1) + 1 == state.threads()) {
+        const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_wall_start).count();
+        wall_rate = static_cast<double>(state.iterations()) * state.threads() / secs;
+    }
+    state.counters["wall_ops/s"] = wall_rate;
+}
+
+static void BM_Inspect_Hot(benchmark::State& state) { run_inspect(state, 1, 0); }
+static void BM_Inspect_Uniform(benchmark::State& state) {
+    const size_t n = g_keys.size();
+    run_inspect(state, n, n * static_cast<size_t>(state.thread_index()) / static_cast<size_t>(state.threads()));
+}
+
+// A tracked hot key (inserted, unlike BM_Hot's).
+static void setup_hot_tracked(const benchmark::State&) { begin_run({"hot"}, kAllowAll, true); }
+
+// N keys inserted, then N others (one byte longer) probed instead.
+static void setup_untracked(const benchmark::State& state) {
+    setup_uniform<false, false>(state);
+    for (auto& k : g_keys) k += 'x';
+}
+
+// Threads, outside the benchmark's, that inspect while the benchmark threads
+// call allow() on the hot key: range(0) threads, each sleeping range(1) ns
+// between inspections as a frame loop would (0 = back to back), reading the
+// hot key if range(2) is 1, or else an untracked key, which costs the same
+// work without sharing the writers' cache line.
+static std::vector<std::thread> g_inspectors;
+static std::atomic<bool> g_stop_inspectors{false};
+static std::atomic<uint64_t> g_inspections{0};
+
+// BM_Hot_Allowed's loop, plus the inspectors' rate over thread 0's run.
+static void BM_Hot_Allowed_Inspected(benchmark::State& state) {
+    BM_Hot<Api::Allow>(state);
+    if (state.thread_index() == 0) {
+        const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_wall_start).count();
+        state.counters["inspect_ops/s"] = static_cast<double>(g_inspections.load()) / secs;
+    }
+}
+
+static void setup_hot_inspected(const benchmark::State& state) {
+    begin_run({"hot"}, kAllowAll, true);
+    g_inspections = 0;
+    g_stop_inspectors = false;
+    const auto pace = std::chrono::nanoseconds(state.range(1));
+    const std::string key = state.range(2) ? g_keys[0] : std::string("elsewhere");
+    for (int64_t t = 0; t < state.range(0); ++t) {
+        g_inspectors.emplace_back([pace, key] {
+            const rl::RateLimiterInProc& limiter = *g_rl;
+            const uint64_t batch = pace.count() ? 1 : 256; // counted in batches when back to back
+            auto next = std::chrono::steady_clock::now();
+            for (uint64_t n = 1; !g_stop_inspectors.load(std::memory_order_relaxed); ++n) {
+                if (pace.count()) std::this_thread::sleep_until(next += pace);
+                rl::BucketState s = limiter.inspect(key, g_limit);
+                benchmark::DoNotOptimize(s);
+                if (n % batch == 0) g_inspections.fetch_add(batch, std::memory_order_relaxed);
+            }
+        });
+    }
+}
+
+static void teardown_hot_inspected(const benchmark::State& state) {
+    g_stop_inspectors = true;
+    for (auto& t : g_inspectors) t.join();
+    g_inspectors.clear();
+    teardown(state);
+}
+
 // ---------- Clock reads ----------
 static void BM_Clock_Fast(benchmark::State& state) {
     rl::FastClock clock;
@@ -307,6 +401,15 @@ BENCHMARK(BM_Uniform<Api::TryAcquire>)->Name("BM_TryAcquire_Uniform_Allowed")->A
     RL_RUN((setup_uniform<false, false>)) RL_THREADS;
 BENCHMARK(BM_Disjoint<Api::TryAcquire>)->Name("BM_TryAcquire_Disjoint_Allowed")->Arg(0) RL_RUN(setup_disjoint) RL_THREADS;
 BENCHMARK(BM_Disjoint<Api::TryAcquireAt>)->Name("BM_TryAcquireAt_Disjoint_Allowed")->Arg(0) RL_RUN(setup_disjoint) RL_THREADS;
+
+// Inspection: the read path alone, then its cost to writers of the same key.
+BENCHMARK(BM_Inspect_Hot) RL_RUN(setup_hot_tracked) RL_THREADS;
+BENCHMARK(BM_Inspect_Uniform)->Arg(100000) RL_RUN((setup_uniform<false, false>)) RL_THREADS;
+BENCHMARK(BM_Inspect_Uniform)->Name("BM_Inspect_Untracked")->Arg(100000) RL_RUN(setup_untracked) RL_THREADS;
+// 2'000'000 ns: about the rate of a 60 fps view of 8 keys.
+BENCHMARK(BM_Hot_Allowed_Inspected)->ArgNames({"inspectors", "pace_ns", "same_key"})
+    ->Args({1, 0, 1})->Args({1, 0, 0})->Args({4, 0, 1})->Args({4, 0, 0})->Args({1, 100'000, 1})->Args({1, 2'000'000, 1})
+    ->Setup(setup_hot_inspected)->Teardown(teardown_hot_inspected)->Threads(1)->Threads(4)->UseRealTime();
 
 BENCHMARK(BM_Clock_Fast);
 BENCHMARK(BM_Clock_Steady);
