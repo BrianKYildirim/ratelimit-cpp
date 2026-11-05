@@ -82,8 +82,10 @@ target_include_directories(ratelimit_core PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-# IMPORTANT: RL_STATIC is **PRIVATE** to the static core (does not leak to consumers)
-target_compile_definitions(ratelimit_core PRIVATE RL_STATIC)
+# IMPORTANT: RL_STATIC is **PUBLIC** so code that links the static core never
+# sees dllimport on Windows; export.h checks RL_EXPORTS first, so ratelimit_c
+# still exports its C API.
+target_compile_definitions(ratelimit_core PUBLIC RL_STATIC)
 
 # ---------- Optional shared library (C++) ----------
 if (RL_BUILD_SHARED)
@@ -265,7 +267,7 @@ if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" OR IS_ABSOLUTE "${CMAKE_INSTALL_INCLUD
   set(RL_PC_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
   set(RL_PC_INCLUDEDIR "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
 else()
-  file(RELATIVE_PATH RL_PC_UP "/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "/")
+  file(RELATIVE_PATH RL_PC_UP "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "${CMAKE_BINARY_DIR}")
   string(REGEX REPLACE "/$" "" RL_PC_UP "${RL_PC_UP}")
   set(RL_PC_PREFIX "\${pcfiledir}/${RL_PC_UP}")
   set(RL_PC_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
