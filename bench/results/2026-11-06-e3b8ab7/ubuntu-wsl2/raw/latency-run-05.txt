@@ -1,0 +1,22 @@
+FastClock uses the TSC: yes; 2.995 ticks/ns; timing overhead 14.0 ns (subtracted)
+scenario                   threads     Mops/s   cpu%   p50 ns   p90 ns   p99 ns p99.9 ns     max ns
+hot_allowed                      1       37.7    100     33.4     34.7    100.2    103.5     135125
+hot_allowed                      2       27.4     99     85.5    179.0    197.0    241.1     207242
+hot_allowed                      4       14.7    100    154.9    482.8   2735.0  10940.1     380510
+hot_allowed                      8       10.6    100    228.4   2020.6  10940.1  10940.1    7047032
+hot_denied                       1       44.6    100     28.0     28.7     32.7     44.7      62224
+hot_denied                       2       85.4     99     28.0     38.1     41.4     72.8      63276
+hot_denied                       4      128.9     99     30.7     40.1     47.4     58.8     131313
+hot_denied                       8      148.3     99     60.8     69.4     82.8    117.5   11555457
+uniform_100k_allowed             1       12.6    100     66.8    190.3    295.8    481.4     137240
+uniform_100k_allowed             2       23.1    100     91.5    200.3    325.2    514.8     226261
+uniform_100k_allowed             4       35.9    100    116.2    203.7    303.1    509.5     710218
+uniform_100k_allowed             8       49.6    100    154.9    229.0    327.2    588.9    7530407
+disjoint_10k_allowed             1       22.9     99     49.4     63.4     79.5    199.7     176856
+disjoint_10k_allowed             2       48.5    100     59.4     84.8    141.6    237.0     217833
+disjoint_10k_allowed             4       63.8     99     86.1    133.5    227.7    358.6     383215
+disjoint_10k_allowed             8       73.9     99    110.8    198.3    278.4    502.8    5244836
+disjoint_10k_try_acquire         1       23.0     99     44.7     59.4     70.8    172.9     136504
+disjoint_10k_try_acquire         2       48.8    100     56.8     80.8    141.6    237.0     195623
+disjoint_10k_try_acquire         4       66.4    100     77.5    123.5    218.3    344.5     855207
+disjoint_10k_try_acquire         8       78.8    100    101.5    190.3    268.4    500.8    6953385

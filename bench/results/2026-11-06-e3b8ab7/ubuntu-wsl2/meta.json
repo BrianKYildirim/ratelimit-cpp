@@ -1,0 +1,301 @@
+{
+ "command": [
+  "python",
+  "bench/run_bench.py",
+  "--env",
+  "ubuntu-wsl2",
+  "--session-date",
+  "2026-11-06"
+ ],
+ "date_utc": "2026-11-06T12:36:34Z",
+ "date_utc_end": "2026-11-06T12:47:12Z",
+ "environment_id": "ubuntu-wsl2",
+ "hardware": {
+  "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+  "logical_cpus": 8,
+  "memory_bytes": 8235192320,
+  "physical_cores": 4
+ },
+ "instrumentation": "glibc-heap-accounting (operator new replacement in rl_bench; counters only in BM_MemoryPerKey)",
+ "library": {
+  "fastclock_uses_tsc": true,
+  "gbench_library_build_type": "release",
+  "google_benchmark": "v1.9.0 (FetchContent URL tag)",
+  "googletest": "v1.14.0 (FetchContent URL tag)",
+  "heap_accounting_wrapper": true
+ },
+ "load": {
+  "cpu_busy_pct_end": 0.0,
+  "cpu_busy_pct_start": 0.0,
+  "loadavg_1m_end": 3.37,
+  "loadavg_1m_start": 1.83
+ },
+ "notes": [
+  "raw text: absolute repo and home paths replaced by <repo> and <home>; line endings normalized to LF",
+  "raw/rl_bench.json context.library_version is git describe of this checkout (the gbench archive has no .git); library.google_benchmark is the real version",
+  "rl_bench on glibc links a global operator new/delete replacement for heap accounting; it counts only inside BM_MemoryPerKey, but every rl_bench benchmark runs through it (RESEARCH Pitfall 7)",
+  "cpu_busy_pct and loadavg describe the WSL VM only, not Windows host activity (RESEARCH Pitfall 4)"
+ ],
+ "os": {
+  "build": "26.04",
+  "family": "Linux",
+  "kernel": "6.18.54.1-microsoft-standard-WSL2",
+  "libc": "glibc 2.43",
+  "name": "Ubuntu 26.04.1 LTS",
+  "wsl": {
+   "distro": "Ubuntu-26.04",
+   "nproc": 8,
+   "version": "3.0.3.0",
+   "wslconfig": null,
+   "wslconfig_note": "absent: WSL defaults apply"
+  }
+ },
+ "power": {
+  "ac_line": true,
+  "scheme": "Balanced",
+  "source": "Windows host through WSL interop: PowerStatus.PowerLineStatus; powercfg.exe /getactivescheme"
+ },
+ "power_end": {
+  "ac_line": true,
+  "scheme": "Balanced",
+  "source": "Windows host through WSL interop: PowerStatus.PowerLineStatus; powercfg.exe /getactivescheme"
+ },
+ "project": "ratelimit-cpp",
+ "raw_files": [
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-01.txt",
+   "sha256": "93e204f5fcf159994eb454cf19b48d1dd8b57e9e6b100e6dbd214b23e8bc80d3"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-02.txt",
+   "sha256": "db58600d6c156ac1a571987b5f36edcaacb643e80c018ac9ff8a50867d4ef142"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-03.txt",
+   "sha256": "bc4296420e9526962d168b46e2719edf99e00832cd8ec5fe102f992555aa090b"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-04.txt",
+   "sha256": "1e65b74f2fbcda1287d3fe89124d76ce2a6f792fafee29fbac2ef0bad82f5bc8"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-05.txt",
+   "sha256": "b8f552d1850345f94b61a2e57f70efb8ca18e3e03c67f107e93c530386fffbbf"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-06.txt",
+   "sha256": "2a1e94d81f4e4b5a4bf04fa99d2f9545dbe4df77ce0b7f99963872b71c87a0c1"
+  },
+  {
+   "bytes": 2182,
+   "path": "raw/latency-run-07.txt",
+   "sha256": "102ad981096ebe0d4b30b50a2fa0c1619da56dfc8ea5d635d3d99b1cb53a0b09"
+  },
+  {
+   "bytes": 921393,
+   "path": "raw/rl_bench.json",
+   "sha256": "984e7b845ce30eccd8a48cf13a0f0a15e304f616d035c6f54cdcfc7a538c59a6"
+  },
+  {
+   "bytes": 281486,
+   "path": "raw/rl_bench.txt",
+   "sha256": "216b48a3eac6120c6e961de329271f004456ec193929fd3bc001f2419436bb79"
+  },
+  {
+   "bytes": 7930,
+   "path": "raw/tests.txt",
+   "sha256": "0297f3578bdb0a106a26174873b9101637b041b2d284e6aaaa2138978bd9755a"
+  }
+ ],
+ "schema": "bench-meta/1",
+ "session_date": "2026-11-06",
+ "source": {
+  "branch": "HEAD",
+  "describe": "e3b8ab7",
+  "dirty": false,
+  "modified": [],
+  "repo": "BrianKYildirim/ratelimit-cpp",
+  "sha": "e3b8ab71fb4af1e1ebb51ab95492ebc766b6e912",
+  "untracked": []
+ },
+ "tag": null,
+ "timer": {
+  "name": "TSC: rdtsc/rdtscp fenced with lfence (rl_latency); std::chrono steady clock (gbench real_time)",
+  "overhead_note": "median cost of an empty timed region, already subtracted from every rl_latency sample",
+  "overhead_ns": 38.7,
+  "resolution_ns": 0.333889816360601,
+  "source": "rl_latency first line, median over runs",
+  "ticks_per_ns": 2.995
+ },
+ "toolchain": {
+  "build_type": "Release",
+  "cmake_options": [
+   "-G",
+   "Ninja",
+   "-DCMAKE_BUILD_TYPE=Release",
+   "-DRL_BUILD_JNI=OFF",
+   "-DRL_BUILD_TESTS=ON",
+   "-DRL_BUILD_BENCH=ON"
+  ],
+  "cmake_system": null,
+  "cmake_version": "4.2.3",
+  "compiler_id": "GNU",
+  "compiler_version": "15.2.0",
+  "cxx_flags": "",
+  "cxx_flags_release": "-O3 -DNDEBUG",
+  "generator": "Ninja"
+ },
+ "validity": {
+  "reasons": [],
+  "runs": [
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.13,
+    "file": "raw/rl_bench.json",
+    "reasons": [],
+    "step": "rl_bench",
+    "valid": true,
+    "waited_s": 1.4
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-01.txt",
+    "reasons": [],
+    "run": 1,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.4
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-02.txt",
+    "reasons": [],
+    "run": 2,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.4
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-03.txt",
+    "reasons": [],
+    "run": 3,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.5
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-04.txt",
+    "reasons": [],
+    "run": 4,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.4
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-05.txt",
+    "reasons": [],
+    "run": 5,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.5
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-06.txt",
+    "reasons": [],
+    "run": 6,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.5
+   },
+   {
+    "ac_line": true,
+    "busy_source": "WSL VM /proc/stat (not the Windows host)",
+    "cpu_busy_pct": 0.0,
+    "file": "raw/latency-run-07.txt",
+    "reasons": [],
+    "run": 7,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.4
+   }
+  ],
+  "tests": {
+   "failed": 0,
+   "passed": 54,
+   "skipped": 0,
+   "total": 54
+  },
+  "valid": true
+ },
+ "workload": {
+  "build_dir": "build-bench-ubuntu-wsl2",
+  "rl_bench": {
+   "filter": null,
+   "min_time": "gbench default (0.5 s)",
+   "min_warmup_time_s": 0.2,
+   "random_interleaving": true,
+   "repetitions": 10,
+   "report_aggregates_only": false
+  },
+  "rl_latency": {
+   "max_threads": 8,
+   "runs": 7,
+   "seconds_per_phase": 0.5
+  },
+  "runner": {
+   "implementation": "cpython",
+   "python": "3.11.18"
+  },
+  "smoke": false,
+  "steps": [
+   [
+    "ctest",
+    "--test-dir",
+    "build-bench-ubuntu-wsl2",
+    "--output-on-failure"
+   ],
+   [
+    "build-bench-ubuntu-wsl2/rl_bench",
+    "--benchmark_repetitions=10",
+    "--benchmark_enable_random_interleaving=true",
+    "--benchmark_min_warmup_time=0.2",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_context=environment_id=ubuntu-wsl2",
+    "--benchmark_out=raw/rl_bench.json"
+   ],
+   [
+    "build-bench-ubuntu-wsl2/rl_latency",
+    "0.5",
+    "8"
+   ]
+  ],
+  "validity": {
+   "max_busy_pct": 10.0,
+   "quiet_timeout_s": 120.0
+  }
+ }
+}

@@ -1,0 +1,304 @@
+{
+ "command": [
+  "python",
+  "bench/run_bench.py",
+  "--env",
+  "windows-native",
+  "--session-date",
+  "2026-11-06"
+ ],
+ "date_utc": "2026-11-06T12:22:27Z",
+ "date_utc_end": "2026-11-06T12:34:04Z",
+ "environment_id": "windows-native",
+ "hardware": {
+  "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+  "logical_cpus": 8,
+  "memory_bytes": 16992018432,
+  "physical_cores": 4
+ },
+ "instrumentation": "none",
+ "library": {
+  "fastclock_uses_tsc": false,
+  "gbench_library_build_type": "release",
+  "google_benchmark": "v1.9.0 (FetchContent URL tag)",
+  "googletest": "v1.14.0 (FetchContent URL tag)",
+  "heap_accounting_wrapper": false
+ },
+ "load": {
+  "cpu_busy_pct_end": 10.22,
+  "cpu_busy_pct_start": 10.02,
+  "loadavg_1m_end": null,
+  "loadavg_1m_start": null
+ },
+ "notes": [
+  "raw text: absolute repo and home paths replaced by <repo> and <home>; line endings normalized to LF",
+  "raw/rl_bench.json context.library_version is git describe of this checkout (the gbench archive has no .git); library.google_benchmark is the real version",
+  "rl_bench BM_MemoryPerKey.keys:1000000.long:0.iterations:1: skipped by the benchmark (heap accounting requires glibc)",
+  "rl_bench BM_MemoryPerKey.keys:1000000.long:1.iterations:1: skipped by the benchmark (heap accounting requires glibc)",
+  "rl_bench BM_MemoryPerKey.keys:700000.long:0.iterations:1: skipped by the benchmark (heap accounting requires glibc)",
+  "rl_bench BM_MemoryPerKey.keys:700000.long:1.iterations:1: skipped by the benchmark (heap accounting requires glibc)",
+  "BM_MemoryPerKey (bytes_per_key, empty_KiB) needs the glibc heap-accounting operator new replacement, so it is absent from this environment's summary (D-12)"
+ ],
+ "os": {
+  "build": "26300.9818",
+  "display_version": "26H2",
+  "family": "Windows",
+  "kernel": null,
+  "name": "Windows 11 Home",
+  "version": "10.0.26300",
+  "wsl": null
+ },
+ "power": {
+  "ac_line": true,
+  "scheme": "Balanced",
+  "source": "GetSystemPowerStatus; powercfg /getactivescheme"
+ },
+ "power_end": {
+  "ac_line": true,
+  "scheme": "Balanced",
+  "source": "GetSystemPowerStatus; powercfg /getactivescheme"
+ },
+ "project": "ratelimit-cpp",
+ "raw_files": [
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-01.txt",
+   "sha256": "99ecaee161aabcbf719afe5f32425210ca7cf61cc6ce3f8be493c78fcd42b7a4"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-02.txt",
+   "sha256": "523c5cf17599966d0e0a842e87edd2b70796db81b0e7803da180e1c60e886ad1"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-03.txt",
+   "sha256": "bc637f9212a923aee9d134477d91cf98bc2f1c62aff18fb53d19edb343eeaf16"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-04.txt",
+   "sha256": "6d112133515a1d7f0795925e663dc25e365bc0335bbd21715f973ec56ec00b97"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-05.txt",
+   "sha256": "56243c62bd79b292201cba235242a7920c22ffae911fa6143da58e0d53090829"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-06.txt",
+   "sha256": "e979d2bb7006161179c3ea94c06d7ce43ce1b2233d34b3f14b53006640803902"
+  },
+  {
+   "bytes": 2181,
+   "path": "raw/latency-run-07.txt",
+   "sha256": "7545394c70bfdb050462ca2007b8fe71fe0cb51449bd0c239731e968919020e2"
+  },
+  {
+   "bytes": 911739,
+   "path": "raw/rl_bench.json",
+   "sha256": "43165f38b405409bc1deb930f9c50c9821f0f97c0fac601cdb8b2835974e969c"
+  },
+  {
+   "bytes": 277282,
+   "path": "raw/rl_bench.txt",
+   "sha256": "4619717fc00bf4e2ce1677a0de7ff8194fa1262932fcb7bc2012fa42d9e5b688"
+  },
+  {
+   "bytes": 8007,
+   "path": "raw/tests.txt",
+   "sha256": "b55fc0c16f3105712757e6fa3c5ae238d26798b9c511e592efe04db1b274f28b"
+  }
+ ],
+ "schema": "bench-meta/1",
+ "session_date": "2026-11-06",
+ "source": {
+  "branch": "phase2-bench",
+  "describe": "e3b8ab7",
+  "dirty": false,
+  "modified": [],
+  "repo": "BrianKYildirim/ratelimit-cpp",
+  "sha": "e3b8ab71fb4af1e1ebb51ab95492ebc766b6e912",
+  "untracked": [
+   "bench/__pycache__/benchmeta.cpython-311.pyc"
+  ]
+ },
+ "tag": null,
+ "timer": {
+  "name": "TSC: rdtsc/rdtscp fenced with lfence (rl_latency); std::chrono steady clock (gbench real_time)",
+  "overhead_note": "median cost of an empty timed region, already subtracted from every rl_latency sample",
+  "overhead_ns": 41.4,
+  "resolution_ns": 0.333889816360601,
+  "source": "rl_latency first line, median over runs",
+  "ticks_per_ns": 2.995
+ },
+ "toolchain": {
+  "build_type": "Release",
+  "cmake_options": [
+   "-G",
+   "Visual Studio 17 2022",
+   "-A",
+   "x64",
+   "-DRL_BUILD_JNI=OFF",
+   "-DRL_BUILD_TESTS=ON",
+   "-DRL_BUILD_BENCH=ON"
+  ],
+  "cmake_system": null,
+  "cmake_version": "3.30.5-msvc23",
+  "compiler_id": "MSVC",
+  "compiler_version": "19.43.34810.0",
+  "cxx_flags": "/DWIN32 /D_WINDOWS /GR /EHsc",
+  "cxx_flags_release": "/O2 /Ob2 /DNDEBUG",
+  "generator": "Visual Studio 17 2022"
+ },
+ "validity": {
+  "reasons": [],
+  "runs": [
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 9.18,
+    "file": "raw/rl_bench.json",
+    "reasons": [],
+    "step": "rl_bench",
+    "valid": true,
+    "waited_s": 26.3
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 6.24,
+    "file": "raw/latency-run-01.txt",
+    "reasons": [],
+    "run": 1,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 16.2
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 7.21,
+    "file": "raw/latency-run-02.txt",
+    "reasons": [],
+    "run": 2,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 41.5
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 7.07,
+    "file": "raw/latency-run-03.txt",
+    "reasons": [],
+    "run": 3,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.0
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 7.16,
+    "file": "raw/latency-run-04.txt",
+    "reasons": [],
+    "run": 4,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.1
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 6.29,
+    "file": "raw/latency-run-05.txt",
+    "reasons": [],
+    "run": 5,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.0
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 8.41,
+    "file": "raw/latency-run-06.txt",
+    "reasons": [],
+    "run": 6,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.0
+   },
+   {
+    "ac_line": true,
+    "busy_source": "GetSystemTimes",
+    "cpu_busy_pct": 7.62,
+    "file": "raw/latency-run-07.txt",
+    "reasons": [],
+    "run": 7,
+    "step": "rl_latency",
+    "valid": true,
+    "waited_s": 1.1
+   }
+  ],
+  "tests": {
+   "failed": 0,
+   "passed": 54,
+   "skipped": 0,
+   "total": 54
+  },
+  "valid": true
+ },
+ "workload": {
+  "build_dir": "build-bench-windows-native",
+  "rl_bench": {
+   "filter": null,
+   "min_time": "gbench default (0.5 s)",
+   "min_warmup_time_s": 0.2,
+   "random_interleaving": true,
+   "repetitions": 10,
+   "report_aggregates_only": false
+  },
+  "rl_latency": {
+   "max_threads": 8,
+   "runs": 7,
+   "seconds_per_phase": 0.5
+  },
+  "runner": {
+   "implementation": "cpython",
+   "python": "3.11.18"
+  },
+  "smoke": false,
+  "steps": [
+   [
+    "ctest",
+    "--test-dir",
+    "build-bench-windows-native",
+    "--output-on-failure",
+    "-C",
+    "Release"
+   ],
+   [
+    "build-bench-windows-native/Release/rl_bench.exe",
+    "--benchmark_repetitions=10",
+    "--benchmark_enable_random_interleaving=true",
+    "--benchmark_min_warmup_time=0.2",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_context=environment_id=windows-native",
+    "--benchmark_out=raw/rl_bench.json"
+   ],
+   [
+    "build-bench-windows-native/Release/rl_latency.exe",
+    "0.5",
+    "8"
+   ]
+  ],
+  "validity": {
+   "max_busy_pct": 10.0,
+   "quiet_timeout_s": 120.0
+  }
+ }
+}
