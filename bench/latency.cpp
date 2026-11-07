@@ -24,10 +24,28 @@
 
 #if defined(__linux__)
 #include <sys/resource.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #include <x86intrin.h>
+static inline uint64_t ticks_begin() {
+    _mm_lfence();
+    const uint64_t t = __rdtsc();
+    _mm_lfence();
+    return t;
+}
+static inline uint64_t ticks_end() {
+    unsigned aux;
+    const uint64_t t = __rdtscp(&aux);
+    _mm_lfence();
+    return t;
+}
+#elif defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
 static inline uint64_t ticks_begin() {
     _mm_lfence();
     const uint64_t t = __rdtsc();
@@ -98,6 +116,14 @@ double process_cpu_seconds() {
     getrusage(RUSAGE_SELF, &ru);
     return static_cast<double>(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) +
            static_cast<double>(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1e6;
+#elif defined(_WIN32)
+    // Kernel plus user time; FILETIME counts 100 ns units.
+    FILETIME created, exited, kernel, user;
+    GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+    const auto seconds = [](const FILETIME& f) {
+        return static_cast<double>(static_cast<uint64_t>(f.dwHighDateTime) << 32 | f.dwLowDateTime) / 1e7;
+    };
+    return seconds(kernel) + seconds(user);
 #else
     return 0;
 #endif

@@ -1,0 +1,113 @@
+Test project <repo>/build-bench-ubuntu-wsl2
+      Start  1: Core.InitialFull
+ 1/54 Test  #1: Core.InitialFull ........................................   Passed    0.00 sec
+      Start  2: Core.NoRefillSameTick
+ 2/54 Test  #2: Core.NoRefillSameTick ...................................   Passed    0.00 sec
+      Start  3: Core.RefillOverTime
+ 3/54 Test  #3: Core.RefillOverTime .....................................   Passed    0.00 sec
+      Start  4: Core.KeyIsolation
+ 4/54 Test  #4: Core.KeyIsolation .......................................   Passed    0.00 sec
+      Start  5: Core.CapacityZero
+ 5/54 Test  #5: Core.CapacityZero .......................................   Passed    0.00 sec
+      Start  6: Core.CapacityZeroWithRefillNeverAllows
+ 6/54 Test  #6: Core.CapacityZeroWithRefillNeverAllows ..................   Passed    0.00 sec
+      Start  7: Core.NoRefillNeverRecovers
+ 7/54 Test  #7: Core.NoRefillNeverRecovers ..............................   Passed    0.00 sec
+      Start  8: Core.ResetMsIsExactAndRoundsUp
+ 8/54 Test  #8: Core.ResetMsIsExactAndRoundsUp ..........................   Passed    0.00 sec
+      Start  9: Core.FractionalRefillAccumulatesWithoutDrift
+ 9/54 Test  #9: Core.FractionalRefillAccumulatesWithoutDrift ............   Passed    0.01 sec
+      Start 10: Core.BurstThenSteadyRate
+10/54 Test #10: Core.BurstThenSteadyRate ................................   Passed    0.00 sec
+      Start 11: Core.RemainingCountsDown
+11/54 Test #11: Core.RemainingCountsDown ................................   Passed    0.00 sec
+      Start 12: Core.LargeCapacity
+12/54 Test #12: Core.LargeCapacity ......................................   Passed    0.00 sec
+      Start 13: Core.CapacityAboveMaxIsClamped
+13/54 Test #13: Core.CapacityAboveMaxIsClamped ..........................   Passed    0.00 sec
+      Start 14: Core.HugeRateAndIdleDoNotOverflow
+14/54 Test #14: Core.HugeRateAndIdleDoNotOverflow .......................   Passed    0.00 sec
+      Start 15: Core.ClockGoingBackwardsAddsNoTokens
+15/54 Test #15: Core.ClockGoingBackwardsAddsNoTokens ....................   Passed    0.00 sec
+      Start 16: Core.ContinuouslyDeniedKeyStaysRecent
+16/54 Test #16: Core.ContinuouslyDeniedKeyStaysRecent ...................   Passed    0.00 sec
+      Start 17: Core.QuietDenialsDoNotChangeLaterVerdicts
+17/54 Test #17: Core.QuietDenialsDoNotChangeLaterVerdicts ...............   Passed    0.00 sec
+      Start 18: Core.LoweringCapacityClampsBalance
+18/54 Test #18: Core.LoweringCapacityClampsBalance ......................   Passed    0.00 sec
+      Start 19: Core.ZeroShardsConfigIsValid
+19/54 Test #19: Core.ZeroShardsConfigIsValid ............................   Passed    0.00 sec
+      Start 20: Core.KeysWithEmbeddedNulAndEmptyKey
+20/54 Test #20: Core.KeysWithEmbeddedNulAndEmptyKey .....................   Passed    0.00 sec
+      Start 21: Core.KeyLengthsAroundInlineLimit
+21/54 Test #21: Core.KeyLengthsAroundInlineLimit ........................   Passed    0.00 sec
+      Start 22: Core.ManyKeysSurviveGrowth
+22/54 Test #22: Core.ManyKeysSurviveGrowth ..............................   Passed    0.03 sec
+      Start 23: Core.ClearForgetsKeys
+23/54 Test #23: Core.ClearForgetsKeys ...................................   Passed    0.00 sec
+      Start 24: Core.EvictIdle
+24/54 Test #24: Core.EvictIdle ..........................................   Passed    0.00 sec
+      Start 25: Core.DefaultClockWorks
+25/54 Test #25: Core.DefaultClockWorks ..................................   Passed    0.00 sec
+      Start 26: Concurrency.HotKeyGrantsExactlyCapacity
+26/54 Test #26: Concurrency.HotKeyGrantsExactlyCapacity .................   Passed    0.00 sec
+      Start 27: Concurrency.RefillIsNeitherLostNorDuplicated
+27/54 Test #27: Concurrency.RefillIsNeitherLostNorDuplicated ............   Passed    0.02 sec
+      Start 28: Concurrency.RefillKeepsUpWithEqualDemand
+28/54 Test #28: Concurrency.RefillKeepsUpWithEqualDemand ................   Passed    0.09 sec
+      Start 29: Concurrency.ManyKeysWithConcurrentInsertsAndEviction
+29/54 Test #29: Concurrency.ManyKeysWithConcurrentInsertsAndEviction ....   Passed    0.01 sec
+      Start 30: Concurrency.TryAcquireHotKeyGrantsExactlyCapacity
+30/54 Test #30: Concurrency.TryAcquireHotKeyGrantsExactlyCapacity .......   Passed    0.01 sec
+      Start 31: Concurrency.GrowthLosesNoUpdates
+31/54 Test #31: Concurrency.GrowthLosesNoUpdates ........................   Passed    0.04 sec
+      Start 32: Concurrency.EvictionDuringTrafficKeepsLiveKeys
+32/54 Test #32: Concurrency.EvictionDuringTrafficKeepsLiveKeys ..........   Passed    0.01 sec
+      Start 33: Concurrency.ClearDuringTraffic
+33/54 Test #33: Concurrency.ClearDuringTraffic ..........................   Passed    0.09 sec
+      Start 34: Concurrency.ShortLivedThreadsAndLimiters
+34/54 Test #34: Concurrency.ShortLivedThreadsAndLimiters ................   Passed    0.02 sec
+      Start 35: Concurrency.InspectionSeesOnlyCommittedStates
+35/54 Test #35: Concurrency.InspectionSeesOnlyCommittedStates ...........   Passed    0.02 sec
+      Start 36: Concurrency.InspectionDuringGrowth
+36/54 Test #36: Concurrency.InspectionDuringGrowth ......................   Passed    0.02 sec
+      Start 37: Concurrency.InspectionDuringEviction
+37/54 Test #37: Concurrency.InspectionDuringEviction ....................   Passed    0.00 sec
+      Start 38: Concurrency.InspectionDuringClear
+38/54 Test #38: Concurrency.InspectionDuringClear .......................   Passed    0.08 sec
+      Start 39: Api.TryAcquireMakesTheSameDecisionAsAllow
+39/54 Test #39: Api.TryAcquireMakesTheSameDecisionAsAllow ...............   Passed    0.00 sec
+      Start 40: Api.CallerSuppliedTimestamps
+40/54 Test #40: Api.CallerSuppliedTimestamps ............................   Passed    0.00 sec
+      Start 41: Differential.MatchesModelOverRandomOperations
+41/54 Test #41: Differential.MatchesModelOverRandomOperations ...........   Passed    0.06 sec
+      Start 42: Differential.InspectionsChangeNoDecisionAndMatchModel
+42/54 Test #42: Differential.InspectionsChangeNoDecisionAndMatchModel ...   Passed    0.23 sec
+      Start 43: Inspect.UntrackedKeyIsNotInsertedAndChangesNothing
+43/54 Test #43: Inspect.UntrackedKeyIsNotInsertedAndChangesNothing ......   Passed    0.00 sec
+      Start 44: Inspect.ReportsStoredStateAndExactRefill
+44/54 Test #44: Inspect.ReportsStoredStateAndExactRefill ................   Passed    0.00 sec
+      Start 45: Inspect.WaitsAreTheFirstNanosecond
+45/54 Test #45: Inspect.WaitsAreTheFirstNanosecond ......................   Passed    0.00 sec
+      Start 46: Inspect.WaitMatchesResetMsRounding
+46/54 Test #46: Inspect.WaitMatchesResetMsRounding ......................   Passed    0.00 sec
+      Start 47: Inspect.EdgeLimits
+47/54 Test #47: Inspect.EdgeLimits ......................................   Passed    0.00 sec
+      Start 48: Inspect.TimeBeforeStoredTimeAddsNothing
+48/54 Test #48: Inspect.TimeBeforeStoredTimeAddsNothing .................   Passed    0.00 sec
+      Start 49: Inspect.QuietDenialsKeepValuesExact
+49/54 Test #49: Inspect.QuietDenialsKeepValuesExact .....................   Passed    0.00 sec
+      Start 50: Inspect.LongAndEmbeddedNulKeys
+50/54 Test #50: Inspect.LongAndEmbeddedNulKeys ..........................   Passed    0.00 sec
+      Start 51: Inspect.ClearEvictionAndGrowth
+51/54 Test #51: Inspect.ClearEvictionAndGrowth ..........................   Passed    0.01 sec
+      Start 52: FastClock.TracksSteadyClock
+52/54 Test #52: FastClock.TracksSteadyClock .............................   Passed    1.30 sec
+      Start 53: FastClock.ConcurrentReadersSeeConsistentTime
+53/54 Test #53: FastClock.ConcurrentReadersSeeConsistentTime ............   Passed    1.10 sec
+      Start 54: c_api
+54/54 Test #54: c_api ...................................................   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 54
+
+Total Test time (real) =   3.27 sec

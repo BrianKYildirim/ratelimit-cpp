@@ -152,7 +152,7 @@ rl::Decision d = limiter.allow("user:123", limit, now);   // same instant
 
 The derived values come from the same function `allow()` uses to decide, run on a copy of the stored state, so they can't drift from real decisions. For a denied call, `reset_ms` equals `until_token_ns` divided by 10^6 and rounded up. The two differ only for a token that never arrives, which `reset_ms` reports as 0 and `inspect()` as `kNever`.
 
-A reading of one key is a state the key really had, never a half-written one. Readings of different keys are separate snapshots, not one atomic view. Denials within 1 ms of a key's stored time aren't written back (see below), so `stored_at_ns` can lag the latest call by up to 1 ms while the derived values stay exact.
+A reading of one key is a state the key really had, never a half-written one. Readings of different keys are separate snapshots, not one atomic view. Denials within <!-- claim:rl.design.quiet_denial_ms -->1 ms of a key's stored time aren't written back (see below), so `stored_at_ns` can lag the latest call by up to <!-- claim:rl.design.quiet_denial_ms -->1 ms while the derived values stay exact.
 
 ### C
 
@@ -193,7 +193,7 @@ allow("user:123", limit)
   └─ return the decision
 ```
 
-**Storage.** Each key lives in one 64-byte slot, which is one cache line: its hash, a version word, the balance, the last-update time, and the key itself if it fits in 28 bytes (longer keys get one exact-size heap allocation). One slot per cache line means a call normally touches only its own key's line, and two keys never share a line that cores would fight over.
+**Storage.** Each key lives in one <!-- claim:rl.design.slot_bytes -->64-byte slot, which is one cache line: its hash, a version word, the balance, the last-update time, and the key itself if it fits in <!-- claim:rl.design.inline_key_bytes -->28 bytes (longer keys get one exact-size heap allocation). One slot per cache line means a call normally touches only its own key's line, and two keys never share a line that cores would fight over.
 
 **Concurrency.**
 - *Lookups take no lock.* A shard publishes its table as a single word, so a reader always sees either the old table or the new one, both complete.
@@ -201,16 +201,16 @@ allow("user:123", limit)
 - *Inserts and structural changes take the shard's mutex.* A new key usually fills an empty slot in place. Growth and eviction build a new table, seal the old slots so in-flight callers retry under the mutex, and publish the new table. `clear()` seals the slots and publishes an empty table.
 - *Old tables are freed safely with epoch-based reclamation.* A reader announces a global epoch while it is inside a table; a replaced table is freed only once every announced epoch has moved past the point where it was retired.
 
-**Over-limit keys.** When one key is flooded, most calls are denials that change nothing, because refill is linear and exact. A denial within 1 ms of the key's stored time therefore skips the write and is decided from a lock-free snapshot, which uses the version word as a seqlock. The key's cache line can then stay shared by every core instead of bouncing between them. Each thread remembers which slots it recently saw denied this way, and reads first only for those. For an ordinary call, reading before locking would cost an extra cache round trip: the line arrives shared, then the lock has to upgrade it. That's why the snapshot path isn't used for every call.
+**Over-limit keys.** When one key is flooded, most calls are denials that change nothing, because refill is linear and exact. A denial within <!-- claim:rl.design.quiet_denial_ms -->1 ms of the key's stored time therefore skips the write and is decided from a lock-free snapshot, which uses the version word as a seqlock. The key's cache line can then stay shared by every core instead of bouncing between them. Each thread remembers which slots it recently saw denied this way, and reads first only for those. For an ordinary call, reading before locking would cost an extra cache round trip: the line arrives shared, then the lock has to upgrade it. That's why the snapshot path isn't used for every call.
 
-**Clock.** The default `FastClock` reads the CPU's timestamp counter, re-anchored to `std::chrono::steady_clock` about every half second, and falls back to `steady_clock` where the counter isn't usable. It exists because `clock_gettime` is a system call under WSL1 and some hypervisors. On my WSL2 laptop, where it isn't, a `FastClock` read took about 10 ns versus about 16 ns for `steady_clock`.
+**Clock.** The default `FastClock` reads the CPU's timestamp counter, re-anchored to `std::chrono::steady_clock` about every half second, and falls back to `steady_clock` where the counter isn't usable. It exists because `clock_gettime` is a system call under WSL1 and some hypervisors. On my laptop under WSL2, where it isn't, a `FastClock` read took <!-- claim:rl.clock.fast.ubuntu-wsl2 -->9.4 ns and a `steady_clock` read took <!-- claim:rl.clock.steady.ubuntu-wsl2 -->15.2 ns (time per read in a Google Benchmark loop, amortized; median of 10 repetitions on Ubuntu under WSL2). MSVC builds don't use the counter, so on native Windows `FastClock` is `steady_clock` (`fastclock_uses_tsc` is false in that run's `meta.json`): a `FastClock` read took <!-- claim:rl.clock.fast.windows-native -->15.8 ns and a `steady_clock` read <!-- claim:rl.clock.steady.windows-native -->15.3 ns, <!-- claim:rl.cmp.clock.windows-native -->no measurable difference (medians of 10 runs each).
 
 ## Design choices and why
 
 | Choice | Alternative | Why |
 | --- | --- | --- |
 | Nanotoken integers | Floating point; Q32.32 fixed point (an earlier version) | Exact refill with one multiply and no drift. Q32.32 overflowed for large capacities; a test (`Core.LargeCapacity`) guards that case. |
-| One 64-byte slot per key, inline keys up to 28 bytes | Separate chaining with pointers; packing several keys per line | A lookup normally touches only its own key's cache line, short keys need no allocation, and neighboring keys never share a line. |
+| One <!-- claim:rl.design.slot_bytes -->64-byte slot per key, inline keys up to <!-- claim:rl.design.inline_key_bytes -->28 bytes | Separate chaining with pointers; packing several keys per line | A lookup normally touches only its own key's cache line, short keys need no allocation, and neighboring keys never share a line. |
 | Lock-free lookup + per-key lock | One lock per shard for everything | Different keys never contend; the shard mutex is only for inserts and rebuilds, which are rare once keys exist. |
 | Epoch-based reclamation | Reference counting; never freeing old tables | Readers pay one atomic announcement and no shared counter traffic; memory is still returned. |
 | Quiet denials from snapshots | Always lock and write | A flooded key's cache line stays shared across cores, so denials scale instead of serializing. Because refill is linear and exact, skipping the write changes no later verdict; the differential tests check this. |
@@ -220,9 +220,9 @@ allow("user:123", limit)
 
 ## Testing
 
-`ctest` runs 54 tests: 53 GoogleTest cases and a C program that links the shared C library, which checks the C symbols are actually exported.
+`ctest` runs <!-- claim:rl.tests.ubuntu-wsl2 -->54 tests: 53 GoogleTest cases and a C program that links the shared C library, which checks the C symbols are actually exported.
 
-- **Exact behavior on a fake clock:** bursts, refill, `reset_ms` rounding, fractional rates (a token every 333,333,333.3 ns), zero and huge rates and capacities, overflow, clocks going backwards, lowered capacities, empty keys, embedded NULs, keys around the 28-byte inline limit, growth, eviction and `clear()`.
+- **Exact behavior on a fake clock:** bursts, refill, `reset_ms` rounding, fractional rates (a token every <!-- claim-waiver: worked arithmetic for a rate of 3 tokens per second (10^9 / 3 ns), a test input, not a measurement -->333,333,333.3 ns), zero and huge rates and capacities, overflow, clocks going backwards, lowered capacities, empty keys, embedded NULs, keys around the <!-- claim:rl.design.inline_key_bytes -->28-byte inline limit, growth, eviction and `clear()`.
 - **Differential tests against a model:** a separate, simple implementation (a `std::map`, with overflow handled by exact division instead of the engine's checks) receives the same random operations as the real limiter, 20,000 per seed across several seeds and table sizes. Every decision, size and eviction count must match. A second differential test sends the same operations to two limiters, one of which is also inspected at random times. Every decision must be identical, and every inspection must match the model and predict the decision made at its instant.
 - **Concurrency:** exact grant counts on a contended key; no lost or duplicated refill under load; inserts that grow tables, eviction and `clear()` running alongside traffic; and inspections racing with all of these, checking that only committed states are ever seen.
 - **Sanitizers:** the suite runs under AddressSanitizer with UndefinedBehaviorSanitizer (`-DRL_ENABLE_ASAN=ON`) and ThreadSanitizer (`-DRL_ENABLE_TSAN=ON`). CI runs both, plus normal builds on Ubuntu and macOS.
@@ -235,6 +235,14 @@ There are two benchmark programs:
 - `rl_bench` (Google Benchmark) covers one hot key, 100,000 shared keys, 10,000 keys per thread, new-key inserts, inspection, and memory per key, at 1 to 16 threads.
 - `rl_latency` prints latency percentiles and wall-clock throughput.
 
+The results below come from one command, which builds the library, runs `ctest`, runs both programs, and writes the raw output, a `meta.json` (hardware, OS, compiler and flags, load, power) and a `summary.json` to `bench/results/<date>-<commit>/<environment>/`:
+
+```sh
+python bench/run_bench.py --env ubuntu-wsl2      # or --env windows-native
+```
+
+For a quick look without the runner:
+
 ```sh
 ./build/rl_bench --benchmark_filter=Hot --benchmark_repetitions=5
 ./build/rl_latency 0.5 8        # seconds per phase, max threads
@@ -242,37 +250,100 @@ There are two benchmark programs:
 
 For multi-threaded runs, read the `wall_ops/s` counter: all threads' calls divided by wall time. Google Benchmark's built-in rate divides by average per-thread time, which overstates throughput when threads finish at different times.
 
-**An example run.** These numbers are calls per second (`wall_ops/s`), the median of 5 repetitions with the lowest and highest in parentheses. They come from one run on a 4-core, 8-thread laptop (Intel i7-1185G7) running Linux under WSL2, with GCC 15 and a Release build, while the machine was otherwise idle. Treat them as one data point, not a guarantee. The same benchmarks measured about 2–3× lower in earlier runs while other programs were using the machine.
+<!-- bench-methodology:begin -->
+**How these numbers were measured.** One session on 2026-11-06, at commit `e3b8ab7`, results in `bench/results/2026-11-06-e3b8ab7/`. Both environments ran on the same 4-core, 8-thread laptop (Intel i7-1185G7), one after the other: Ubuntu 26.04 under WSL2 with GCC 15.2 (`-O3`), and native Windows 11 with MSVC 19.43 (`/O2`), both Release builds.
 
+- **Warm-up:** Google Benchmark runs each benchmark for <!-- claim-waiver: harness setting passed to rl_bench (--benchmark_min_warmup_time), not a measurement -->0.2 s before timing it. In `rl_latency`, the fixture inserts and the throughput phase run before the latency phase; there is no separate warm-up.
+- **Timer:** `rl_bench` times with `std::chrono::steady_clock` (Google Benchmark real time) and reports time per iteration, which is an average over many calls, not a per-call latency. `rl_latency` times each call with the CPU's timestamp counter (`rdtsc`/`rdtscp` fenced with `lfence`), calibrated at <!-- claim:rl.timer.ticks_per_ns.ubuntu-wsl2 -->2.995 ticks/ns on Ubuntu and <!-- claim:rl.timer.ticks_per_ns.windows-native -->2.995 ticks/ns on Windows. The median cost of an empty timed region, <!-- claim:rl.timer.overhead_ns.ubuntu-wsl2 -->38.7 ns on Ubuntu and <!-- claim:rl.timer.overhead_ns.windows-native -->41.4 ns on Windows, is subtracted from every sample. Samples at or above 8192 ticks are counted in power-of-two buckets, so a percentile that lands there is the bucket's lower bound (shown with ≥). The resolution of `steady_clock` on Windows isn't recorded in `meta.json`; it matters little for `rl_bench` because each reported time is averaged over many iterations.
+- **Repetitions:** `rl_bench` runs every benchmark 10 times, randomly interleaved (`--benchmark_enable_random_interleaving`), so a slow period is spread across benchmarks instead of hitting one. `rl_latency` runs 7 times, <!-- claim-waiver: workload parameter of rl_latency (seconds per phase), not a measurement -->0.5 s per phase, at up to 8 threads. Tables show the median, with the lowest and highest run in parentheses.
+- **Outliers:** no samples are dropped. A whole run is marked invalid, kept in `raw/` and left out of the statistics if the laptop is on battery, if the CPU stays busy after waiting, or if a step fails. No run in this session was invalid.
+- **Noise control:** AC power, Windows power mode Balanced, other applications closed, one environment at a time. Before each measured step the runner waits until CPU use is below <!-- claim-waiver: threshold setting of the runner's quiet gate (--max-busy-pct), not a measurement -->10%, read from `GetSystemTimes` on Windows and from the WSL VM's `/proc/stat` on Ubuntu (which can't see activity on the Windows host).
+<!-- bench-methodology:end -->
+
+**Throughput.** Calls per second (`wall_ops/s`), the median of 10 interleaved repetitions with the lowest and highest in parentheses. Treat them as data points for this machine, not a guarantee.
+
+Ubuntu under WSL2:
+
+<!-- claims-table:begin id=rl.example_run.ubuntu-wsl2 -->
 | Scenario | 1 thread | 8 threads |
-|---|---|---|
-| One hot key, every call allowed (`Hot_Allowed`) | 36.3M (31.0–37.3M) | 10.6M (8.8–13.5M) |
-| One hot key, almost every call denied (`Hot_Denied`) | 44.5M (41.5–45.2M) | 153.0M (128.2–161.8M) |
-| 100,000 keys shared by all threads (`Uniform_Allowed`) | 12.3M (10.2–13.5M) | 59.2M (44.3–60.8M) |
-| 10,000 keys per thread (`Disjoint_Allowed`) | 26.3M (25.0–26.8M) | 82.3M (67.3–91.8M) |
-| `inspect()` on one hot key (`Inspect_Hot`) | 45.1M (41.3–47.7M) | 134.8M (119.1–163.1M) |
+|---|---:|---:|
+| One hot key, every call allowed (`Hot_Allowed`) | 37.9M (35.5–40.3M) | 9.9M (7.0–13.0M) |
+| One hot key, almost every call denied (`Hot_Denied`) | 45.5M (41.9–47.2M) | 153.3M (116.7–178.2M) |
+| 100,000 keys shared by all threads (`Uniform_Allowed`) | 14.3M (13.3–14.8M) | 55.1M (47.7–64.7M) |
+| 10,000 keys per thread (`Disjoint_Allowed`) | 28.3M (23.8–29.2M) | 90.3M (71.3–95.9M) |
+| `inspect()` on one hot key (`Inspect_Hot`) | 49.6M (47.3–50.2M) | 161.1M (123.3–191.7M) |
+<!-- claims-table:end -->
 
-What I can report with more confidence:
+Native Windows:
 
-- **Memory:** heap bytes per key, measured by the `MemoryPerKey` benchmark, which counts every allocation. Tables double in size, so the cost depends on where the key count falls.
+<!-- claims-table:begin id=rl.example_run.windows-native -->
+| Scenario | 1 thread | 8 threads |
+|---|---:|---:|
+| One hot key, every call allowed (`Hot_Allowed`) | 17.0M (16.4–17.7M) | 5.7M (4.5–6.6M) |
+| One hot key, almost every call denied (`Hot_Denied`) | 15.8M (14.9–16.0M) | 50.9M (35.4–67.7M) |
+| 100,000 keys shared by all threads (`Uniform_Allowed`) | 9.1M (8.5–9.4M) | 43.5M (29.2–48.4M) |
+| 10,000 keys per thread (`Disjoint_Allowed`) | 14.8M (14.3–15.6M) | 48.3M (34.7–55.3M) |
+| `inspect()` on one hot key (`Inspect_Hot`) | 14.6M (14.0–15.3M) | 45.4M (37.0–67.2M) |
+<!-- claims-table:end -->
 
-  | Keys | Key type | Bytes per key |
-  |---|---|---|
-  | 700,000 | short (`key_123`) | ~97 |
-  | 1,000,000 | short | ~134 |
-  | 700,000 | 60–65 bytes | ~168 |
-  | 1,000,000 | 60–65 bytes | ~206 |
+**Per-call latency.** `rl_latency` times every call; p50 and p99 are over all threads' calls in one run, and the table shows the median of 7 runs with the lowest and highest in parentheses.
 
-  An empty limiter with the default 128 shards allocates about 9 KiB.
-- **Scaling on one hot key behaves as designed.** With all threads hitting one key, denied traffic went up about 3.4× from 1 to 8 threads, because denials only read the key's cache line. Admitted traffic dropped to under a third, because every admitted call must write that same line. The same pattern showed up in every run, including the noisy ones.
+Ubuntu under WSL2:
+
+<!-- claims-table:begin id=rl.latency.ubuntu-wsl2 -->
+| Scenario | Threads | p50 | p99 |
+|---|---:|---:|---:|
+| `hot_allowed` | 1 | 8.7 ns (6.0–34.1 ns) | 30.7 ns (25.4–100 ns) |
+| `hot_allowed` | 8 | 204 ns (196–228 ns) | ≥ 10,940 ns |
+| `hot_denied` | 1 | 3.3 ns (0.7–28.7 ns) | 19.4 ns (4.7–38.7 ns) |
+| `hot_denied` | 8 | 38.7 ns (34.1–64.1 ns) | 61.4 ns (54.1–88.8 ns) |
+<!-- claims-table:end -->
+
+Native Windows:
+
+<!-- claims-table:begin id=rl.latency.windows-native -->
+| Scenario | Threads | p50 | p99 |
+|---|---:|---:|---:|
+| `hot_allowed` | 1 | 28.7 ns (28.0–42.1 ns) | 50.7 ns (40.1–148 ns) |
+| `hot_allowed` | 8 | 395 ns (359–512 ns) | ≥ 10,940 ns |
+| `hot_denied` | 1 | 34.7 ns (34.1–48.7 ns) | 66.8 ns (48.1–147 ns) |
+| `hot_denied` | 8 | 113 ns (68.8–120 ns) | 156 ns (91.5–169 ns) |
+<!-- claims-table:end -->
+
+**Windows and Ubuntu.** I state a difference only where the two environments' lowest-to-highest ranges don't overlap. On one hot key at 8 threads, denials were <!-- claim:rl.cmp.hot_denied.t8 -->faster on Ubuntu on WSL2 by ~3.0×, medians of 10 runs each. With 10,000 keys per thread at 1 thread, calls were <!-- claim:rl.cmp.disjoint_allowed.t1 -->faster on Ubuntu on WSL2 by ~1.9×, medians of 10 runs each. For the p50 latency of an allowed call on one hot key at 1 thread, the ranges overlap: <!-- claim:rl.cmp.lat.hot_allowed.t1.p50 -->no measurable difference (medians of 7 runs each). Why Ubuntu is faster is a hypothesis I haven't verified: MSVC `/O2` versus GCC `-O3` code generation, and `FastClock` falling back to `steady_clock` under MSVC. The clock part can't be the whole story: reading the clock is a median <!-- claim:rl.clock_share.windows-native -->0.13 of `try_acquire()` time on Windows and <!-- claim:rl.clock_share.ubuntu-wsl2 -->0.16 on Ubuntu (`clock_share` in `summary.json`), too small a share of a call to explain the gap by itself.
+
+Other findings:
+
+- **Memory:** heap bytes per key, measured by the `MemoryPerKey` benchmark, which counts every allocation through a heap-accounting allocator (a replacement `operator new`). That allocator needs glibc, so memory is measured only on Ubuntu under WSL2; on Windows the benchmark skips itself. On Ubuntu, `rl_bench` is linked with the allocator for every benchmark, but it counts only inside `MemoryPerKey`. Tables double in size, so the cost depends on where the key count falls. The 10 repetitions agree to the digit shown.
+
+  <!-- claims-table:begin id=rl.memory.ubuntu-wsl2 -->
+  | Keys | Key type | Bytes per key | Counted by |
+  |---:|---|---:|---|
+  | 700,000 | short (`key_123`) | 95.9 | heap-accounting allocator |
+  | 1,000,000 | short | 134.2 | heap-accounting allocator |
+  | 700,000 | 60–65 bytes | 167.9 | heap-accounting allocator |
+  | 1,000,000 | 60–65 bytes | 206.2 | heap-accounting allocator |
+  <!-- claims-table:end -->
+
+  An empty limiter with the default <!-- claim:rl.design.default_shards -->128 shards allocates <!-- claim:rl.memory.empty.ubuntu-wsl2 -->9.1 KiB (counted by the heap-accounting allocator).
+- **Scaling on one hot key behaves as designed.** With all threads hitting one key, denied traffic went up <!-- claim:rl.scaling.hot_denied.ubuntu-wsl2 -->3.5× from 1 to 8 threads on Ubuntu and <!-- claim:rl.scaling.hot_denied.windows-native -->3.3× on Windows, because denials only read the key's cache line. Admitted traffic fell to <!-- claim:rl.scaling.hot_allowed.ubuntu-wsl2 -->0.25× of its 1-thread rate on Ubuntu and <!-- claim:rl.scaling.hot_allowed.windows-native -->0.33× on Windows, because every admitted call must write that same line. Each figure is the median of 10 per-repetition ratios, and every repetition showed the same pattern in both environments.
 - **Inspection doesn't slow decisions down.** When adding `inspect()`, I compared the compiled machine code of `allow()` and `try_acquire()` before and after: the instructions were identical. I also counted CPU instructions per call with `perf`, which background load doesn't distort. In every benchmark scenario they matched within normal run-to-run variation.
-- **The real cost of inspection is cache-line sharing.** One thread inspecting a hot key in a tight loop cut the throughput of a thread calling `allow()` on it by about 40%, while the same work on another key had no measurable effect. At 500 or 10,000 reads per second, the range a live view would use, I could measure no difference.
+- **The real cost of inspection is cache-line sharing.** One thread inspecting a hot key in a tight loop made each `allow()` call on that key take <!-- claim:rl.inspect.same_key_cost.ubuntu-wsl2 -->1.7× as long on Ubuntu and <!-- claim:rl.inspect.same_key_cost.windows-native -->1.7× as long on Windows as the same loop on an untracked key (medians of 10 per-repetition ratios). The table compares time per `allow()` call (Google Benchmark time per iteration, amortized, 1 deciding thread) with no inspector. The tight loop on an untracked key made no measurable difference on Ubuntu but slowed calls on Windows. Reading the hot key at 500 or 10,000 reads per second, the range a live view would use, made no measurable difference in either environment.
+
+  <!-- claims-table:begin id=rl.inspect -->
+  | Inspector thread | Ubuntu under WSL2 | vs no inspector | Native Windows | vs no inspector |
+  |---|---:|---|---:|---|
+  | None | 26.4 ns (24.8–28.2 ns) |  | 58.8 ns (56.4–60.9 ns) |  |
+  | Back to back on an untracked key | 29.3 ns (25.5–34.9 ns) | no measurable difference (medians of 10 runs each) | 82.6 ns (73.8–91.2 ns) | slower with the inspector by ~1.4×, medians of 10 runs each |
+  | Same hot key, 10,000 reads per second | 27.0 ns (24.7–28.7 ns) | no measurable difference (medians of 10 runs each) | 59.0 ns (56.9–63.0 ns) | no measurable difference (medians of 10 runs each) |
+  | Same hot key, 500 reads per second | 24.9 ns (24.6–28.2 ns) | no measurable difference (medians of 10 runs each) | 58.0 ns (56.1–66.3 ns) | no measurable difference (medians of 10 runs each) |
+  <!-- claims-table:end -->
 
 ## Challenges and what I learned
 
-**Measuring performance honestly is harder than making code fast.** My first before/after benchmark runs seemed to show changes of 30% or more, in both directions. Running the *same* binary twice showed just as much spread, because other programs were sharing the machine. I switched to three methods that hold up under noise: comparing generated assembly, counting instructions with `perf stat`, and interleaving short before/after/before runs so background load affects both sides alike. *Lesson: measure the noise first, and prefer evidence that noise can't fake.*
+**Measuring performance honestly is harder than making code fast.** My first before/after benchmark runs seemed to show large changes, in both directions. Running the *same* binary twice showed just as much spread, because other programs were sharing the machine. I switched to three methods that hold up under noise: comparing generated assembly, counting instructions with `perf stat`, and interleaving short before/after/before runs so background load affects both sides alike. *Lesson: measure the noise first, and prefer evidence that noise can't fake.*
 
-**A benchmark can change the thing it measures.** Adding an inspection benchmark to a shared helper changed the compiler's inlining decisions, which added about 7 instructions per call to existing, unrelated benchmarks, even though the library itself hadn't changed at all. Keeping the new benchmark code separate restored identical machine code. *Lesson: when numbers move, check the harness too, not just the code under test.*
+**A benchmark can change the thing it measures.** Adding an inspection benchmark to a shared helper changed the compiler's inlining decisions, which added about <!-- claim-waiver: historical anecdote from development (an instruction count seen with perf at the time), not a current performance figure -->7 instructions per call to existing, unrelated benchmarks, even though the library itself hadn't changed at all. Keeping the new benchmark code separate restored identical machine code. *Lesson: when numbers move, check the harness too, not just the code under test.*
 
 **Freeing memory while other threads might still read it.** Lookups take no lock, so a table replaced by growth or eviction can't simply be deleted. Epoch-based reclamation solved this, but it meant reasoning carefully about memory ordering, and about the states a slot can be in mid-change (being written, sealed, or moved to a new table).
 
@@ -282,16 +353,16 @@ What I can report with more confidence:
 
 **Tools have blind spots.** ThreadSanitizer doesn't model the memory fences a seqlock relies on (the compiler even warns about it), so a clean TSan run doesn't prove the snapshot logic is correct. The concurrency tests therefore check the observable property directly: a reader must never see a mix of two states.
 
-**A test that depends on timing will eventually fail.** One eviction test checked that the evictor had removed something while traffic was running. Usually it had. But in 6 to 28 runs out of 1,000 on my machine, depending on the build, the traffic threads finished their fixed number of rounds before the evictor thread got going. The fix was to make the traffic keep going until eviction had happened (with a bound), rather than hope the scheduler cooperates. *Lesson: a concurrency test should wait for the condition it needs, not for a fixed amount of work; run it a few thousand times before trusting it.*
+**A test that depends on timing will eventually fail.** One eviction test checked that the evictor had removed something while traffic was running. Usually it had. But in <!-- claim-waiver: historical anecdote about a flaky test during development (failure counts from repeated test runs), not a performance figure -->6 to 28 runs out of 1,000 on my machine, depending on the build, the traffic threads finished their fixed number of rounds before the evictor thread got going. The fix was to make the traffic keep going until eviction had happened (with a bound), rather than hope the scheduler cooperates. *Lesson: a concurrency test should wait for the condition it needs, not for a fixed amount of work; run it a few thousand times before trusting it.*
 
 **Smaller lessons.** CMake's default (unset) build type compiles without optimization, so the project now defaults to Release. Building shared libraries with hidden symbol visibility silently hid the C API until it was explicitly exported; the C test now links against the shared library to catch that.
 
 ## Limitations
 
 - In-process only; no distributed limits.
-- I build and test locally on Linux with GCC; CI builds and tests on Ubuntu and macOS. Windows isn't built or tested. The code has MSVC paths, and I removed the GCC-only constructs I found in the tests and benchmarks, but without an MSVC build that's unverified.
+- I build and test locally on Linux with GCC (Ubuntu under WSL2) and on Windows with MSVC 2022, where the full suite of <!-- claim:rl.tests.windows-native -->54 tests passes. CI still builds and tests only on Ubuntu and macOS. On MSVC, `FastClock` falls back to `steady_clock`, and the memory-per-key benchmark is skipped because its allocation counter needs glibc.
 - The lock-free snapshot read retries while a writer holds the key, with backoff. It doesn't have a hard bound under continuous writes to one key.
-- `FastClock` can step backwards when it re-anchors to `steady_clock`. On my machine under heavy load I've seen steps of up to about 1 ms, which makes the two `FastClock` tests (100 µs tolerance) fail intermittently. A backwards step can't make the limiter grant extra tokens, since an earlier time adds none, but it can delay refill by up to the size of the step.
+- `FastClock` can step backwards when it re-anchors to `steady_clock`. On my machine under heavy load I've seen steps of up to about <!-- claim-waiver: historical observation from development under heavy load, not a benchmark result -->1 ms, which makes the two `FastClock` tests (<!-- claim:rl.design.fastclock_test_tolerance_us -->100 µs tolerance) fail intermittently. A backwards step can't make the limiter grant extra tokens, since an earlier time adds none, but it can delay refill by up to the size of the step.
 - The JNI bridge exposes only `allow()`, on one shared limiter, with `int` limits.
 
 ## Building, installing and using it from CMake

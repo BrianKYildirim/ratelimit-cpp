@@ -1,11 +1,15 @@
 // include/ratelimit/export.h
 #pragma once
 
-// If you compile the lib as static, callers shouldn't see dllimport/dllexport.
-#if defined(_WIN32) && !defined(RL_STATIC)
+// RL_EXPORTS is checked first: ratelimit_c links the static core (which brings
+// RL_STATIC) and still has to export its C API.
+#if defined(_WIN32)
   // Building *this* DLL should define RL_EXPORTS on its compile command line.
   #if defined(RL_EXPORTS)
     #define RL_API __declspec(dllexport)
+  // If you compile the lib as static, callers shouldn't see dllimport/dllexport.
+  #elif defined(RL_STATIC)
+    #define RL_API
   #else
     #define RL_API __declspec(dllimport)
   #endif
