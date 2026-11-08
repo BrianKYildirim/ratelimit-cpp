@@ -4,7 +4,7 @@
 
 A thread-safe, in-process rate limiter for C++20, with C and Java (JNI) bindings.
 
-**In plain terms:** a rate limiter decides whether a request may go ahead right now, for example "each user may make 10 requests, refilling at 5 per second". Servers use one to protect themselves from floods of traffic, to stop login brute-forcing, or to share capacity fairly between customers. This library makes that decision inside your program, for many different keys (users, IP addresses, API tokens; the benchmarks go up to a million), from many threads at once.
+**In plain terms:** a rate limiter decides whether a request may go ahead right now, for example "each user may make 10 requests, refilling at <!-- claim-waiver: illustrative limit configuration in the plain-terms example, not a measurement -->5 per second". Servers use one to protect themselves from floods of traffic, to stop login brute-forcing, or to share capacity fairly between customers. This library makes that decision inside your program, for many different keys (users, IP addresses, API tokens; the benchmarks go up to a million), from many threads at once.
 
 **In technical terms:** a sharded, open-addressing hash table of token buckets with lock-free lookups, a per-entry version lock that doubles as a seqlock, epoch-based memory reclamation, and exact integer refill arithmetic. It also has a read-only inspection API that reports a bucket's real state without affecting any decision.
 
@@ -53,7 +53,7 @@ ctest --test-dir build --output-on-failure
 
 JNI is on by default and needs a JDK; `-DRL_BUILD_JNI=OFF` skips it. GoogleTest and Google Benchmark are downloaded by CMake.
 
-Try the command-line example. It reads one key per line and applies a limit of 10 tokens refilling at 5 per second:
+Try the command-line example. It reads one key per line and applies a limit of 10 tokens refilling at <!-- claim-waiver: limit configuration of the command-line example, not a measurement -->5 per second:
 
 ```sh
 printf "user-1\nuser-1\nuser-1\n" | ./build/rl_cli
@@ -328,7 +328,7 @@ Other findings:
   An empty limiter with the default <!-- claim:rl.design.default_shards -->128 shards allocates <!-- claim:rl.memory.empty.ubuntu-wsl2 -->9.1 KiB (counted by the heap-accounting allocator).
 - **Scaling on one hot key behaves as designed.** With all threads hitting one key, denied traffic went up <!-- claim:rl.scaling.hot_denied.ubuntu-wsl2 -->3.5× from 1 to 8 threads on Ubuntu and <!-- claim:rl.scaling.hot_denied.windows-native -->3.3× on Windows, because denials only read the key's cache line. Admitted traffic fell to <!-- claim:rl.scaling.hot_allowed.ubuntu-wsl2 -->0.25× of its 1-thread rate on Ubuntu and <!-- claim:rl.scaling.hot_allowed.windows-native -->0.33× on Windows, because every admitted call must write that same line. Each figure is the median of 10 per-repetition ratios, and every repetition showed the same pattern in both environments.
 - **Inspection doesn't slow decisions down.** When adding `inspect()`, I compared the compiled machine code of `allow()` and `try_acquire()` before and after: the instructions were identical. I also counted CPU instructions per call with `perf`, which background load doesn't distort. In every benchmark scenario they matched within normal run-to-run variation.
-- **The real cost of inspection is cache-line sharing.** One thread inspecting a hot key in a tight loop made each `allow()` call on that key take <!-- claim:rl.inspect.same_key_cost.ubuntu-wsl2 -->1.7× as long on Ubuntu and <!-- claim:rl.inspect.same_key_cost.windows-native -->1.7× as long on Windows as the same loop on an untracked key (medians of 10 per-repetition ratios). The table compares time per `allow()` call (Google Benchmark time per iteration, amortized, 1 deciding thread) with no inspector. The tight loop on an untracked key made no measurable difference on Ubuntu but slowed calls on Windows. Reading the hot key at 500 or 10,000 reads per second, the range a live view would use, made no measurable difference in either environment.
+- **The real cost of inspection is cache-line sharing.** One thread inspecting a hot key in a tight loop made each `allow()` call on that key take <!-- claim:rl.inspect.same_key_cost.ubuntu-wsl2 -->1.7× as long on Ubuntu and <!-- claim:rl.inspect.same_key_cost.windows-native -->1.7× as long on Windows as the same loop on an untracked key (medians of 10 per-repetition ratios). The table compares time per `allow()` call (Google Benchmark time per iteration, amortized, 1 deciding thread) with no inspector. The tight loop on an untracked key made no measurable difference on Ubuntu but slowed calls on Windows. Reading the hot key at 500 or <!-- claim-waiver: inspector read rate, a workload parameter of the inspection benchmark, not a measurement -->10,000 reads per second, the range a live view would use, made no measurable difference in either environment.
 
   <!-- claims-table:begin id=rl.inspect -->
   | Inspector thread | Ubuntu under WSL2 | vs no inspector | Native Windows | vs no inspector |
