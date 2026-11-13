@@ -10,6 +10,26 @@ option(RL_BUILD_BENCH  "Build benchmarks" ON)
 option(RL_ENABLE_TSAN  "Enable TSAN in a job (for CI)" OFF)
 option(RL_ENABLE_ASAN  "Enable ASan + UBSan" OFF)
 option(RL_BUILD_JNI    "Build JNI bindings" ON)
+option(RL_BUILD_WASM   "Build the C API as a WebAssembly ES module (Emscripten)" OFF)
+option(RL_BUILD_PARITY "Build the native parity runner and register parity tests" OFF)
+
+# ---------- WebAssembly build guards ----------
+# The WebAssembly build has its own target set; it never overrides a user option.
+if (RL_BUILD_WASM)
+  if (NOT EMSCRIPTEN)
+    message(FATAL_ERROR "RL_BUILD_WASM needs the Emscripten toolchain: configure with emcmake cmake")
+  endif()
+  set(RL_WASM_CONFLICTS "")
+  foreach(opt RL_BUILD_SHARED RL_BUILD_TESTS RL_BUILD_BENCH RL_BUILD_JNI)
+    if (${opt})
+      list(APPEND RL_WASM_CONFLICTS ${opt})
+    endif()
+  endforeach()
+  if (RL_WASM_CONFLICTS)
+    list(JOIN RL_WASM_CONFLICTS ", " RL_WASM_CONFLICTS)
+    message(FATAL_ERROR "RL_BUILD_WASM needs RL_BUILD_SHARED, RL_BUILD_TESTS, RL_BUILD_BENCH and RL_BUILD_JNI OFF (on: ${RL_WASM_CONFLICTS})")
+  endif()
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -112,24 +132,108 @@ if (RL_BUILD_SHARED)
 endif()
 
 # ---------- C API (shared) ----------
-add_library(ratelimit_c SHARED
-  c_api/ratelimit_c.cpp
-)
-target_include_directories(ratelimit_c PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${RL_GEN_DIR}>
-  $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(ratelimit_c PRIVATE ratelimit_core)
-target_compile_definitions(ratelimit_c PRIVATE RL_EXPORTS)
-
-# Hide non-API symbols on GCC/Clang
-if (NOT MSVC)
-  set_target_properties(ratelimit_c PROPERTIES
-    C_VISIBILITY_PRESET hidden
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
+# Not built for WebAssembly: Emscripten turns SHARED into a side module.
+if (NOT RL_BUILD_WASM)
+  add_library(ratelimit_c SHARED
+    c_api/ratelimit_c.cpp
   )
+  target_include_directories(ratelimit_c PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${RL_GEN_DIR}>
+    $<INSTALL_INTERFACE:include>
+  )
+  target_link_libraries(ratelimit_c PRIVATE ratelimit_core)
+  target_compile_definitions(ratelimit_c PRIVATE RL_EXPORTS)
+
+  # Hide non-API symbols on GCC/Clang
+  if (NOT MSVC)
+    set_target_properties(ratelimit_c PROPERTIES
+      C_VISIBILITY_PRESET hidden
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN YES
+    )
+  endif()
+endif()
+
+# ---------- WebAssembly module (Emscripten) ----------
+# The C API as an ES module: ratelimit.mjs (glue) + ratelimit.wasm. Build it
+# with scripts/build-wasm.sh, which pins the toolchain and the build inputs.
+if (RL_BUILD_WASM)
+  add_executable(ratelimit_wasm c_api/ratelimit_c.cpp)
+  target_link_libraries(ratelimit_wasm PRIVATE ratelimit_core)
+  target_compile_definitions(ratelimit_wasm PRIVATE RL_EXPORTS)
+  set_target_properties(ratelimit_wasm PROPERTIES OUTPUT_NAME ratelimit SUFFIX ".mjs")
+
+  # One -sKEY=VALUE token per setting, so CMake's option de-duplication cannot
+  # merge repeated "-s" tokens. Deliberately absent:
+  #   -sWASM_BIGINT: BigInt integration is the default since Emscripten 4.0.0
+  #     and the flag is deprecated since 6.0.8 (owner decision 2026-11-12).
+  #   -fwasm-exceptions: Emscripten's default is kept, so a C++ throw aborts the
+  #     module instead of reaching the C API's catch blocks (owner decision 2026-11-12).
+  #   -pthread: the module is single-threaded.
+  #   rl_evict_idle, rl_now_ns, rl_allow, rl_inspect and rl_try_acquire are not
+  #     exported: callers supply every time, and nothing compares stored times
+  #     to the limiter's own clock.
+  set(RL_WASM_LINK_FLAGS
+    -O3
+    --no-entry
+    -sMODULARIZE=1
+    -sEXPORT_ES6=1
+    -sENVIRONMENT=web,node
+    -sFILESYSTEM=0
+    -sDYNAMIC_EXECUTION=0
+    -sALLOW_MEMORY_GROWTH=1
+    -sEXPORTED_RUNTIME_METHODS=HEAPU8
+    -sEXPORTED_FUNCTIONS=_rl_version,_rl_new_inproc,_rl_allow_at,_rl_inspect_at,_rl_free,_malloc,_free
+  )
+  target_link_options(ratelimit_wasm PRIVATE ${RL_WASM_LINK_FLAGS})
+endif()
+
+# ---------- Parity (native vs WebAssembly) ----------
+# Canonical traces in tests/parity/traces run through the C API; see
+# tests/parity/README.md. Golden outcomes are written by the native runner
+# only (rl_parity_native --write); the WebAssembly leg compares and never
+# writes. A default native configuration registers nothing here, so its test
+# count is unchanged.
+if (RL_BUILD_PARITY OR RL_BUILD_WASM)
+  file(GLOB RL_PARITY_TRACES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/parity/traces/*.jsonl")
+  set(RL_PARITY_GOLDEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/parity/golden")
+endif()
+
+# Native leg: the same translation units as the WebAssembly module.
+if (RL_BUILD_PARITY AND NOT RL_BUILD_WASM)
+  enable_language(C)
+  enable_testing()
+  add_executable(rl_parity_native tests/parity/rl_parity_native.c c_api/ratelimit_c.cpp)
+  target_link_libraries(rl_parity_native PRIVATE ratelimit_core)
+  target_compile_definitions(rl_parity_native PRIVATE RL_EXPORTS _CRT_SECURE_NO_WARNINGS)
+  set_target_properties(rl_parity_native PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+  foreach(trace ${RL_PARITY_TRACES})
+    get_filename_component(stem "${trace}" NAME_WE)
+    add_test(NAME parity_native.${stem}
+             COMMAND rl_parity_native "${trace}" "${RL_PARITY_GOLDEN_DIR}/${stem}.out")
+  endforeach()
+endif()
+
+# WebAssembly leg: Node runs the built module against the same golden files.
+if (RL_BUILD_WASM)
+  enable_testing()
+  if (CMAKE_CROSSCOMPILING_EMULATOR)
+    set(RL_PARITY_NODE ${CMAKE_CROSSCOMPILING_EMULATOR})
+  elseif (DEFINED ENV{EMSDK_NODE})
+    set(RL_PARITY_NODE "$ENV{EMSDK_NODE}")
+  else()
+    find_program(RL_PARITY_NODE node)
+  endif()
+  if (NOT RL_PARITY_NODE)
+    message(FATAL_ERROR "RL_BUILD_WASM registers the parity tests and needs Node: activate emsdk or put node on PATH")
+  endif()
+  foreach(trace ${RL_PARITY_TRACES})
+    get_filename_component(stem "${trace}" NAME_WE)
+    add_test(NAME parity_wasm.${stem}
+             COMMAND ${RL_PARITY_NODE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/parity/run_wasm.mjs"
+                     $<TARGET_FILE:ratelimit_wasm> "${trace}" "${RL_PARITY_GOLDEN_DIR}/${stem}.out")
+  endforeach()
 endif()
 
 # ---------- JNI (optional) ----------
@@ -153,8 +257,10 @@ if (RL_BUILD_JNI)
 endif()
 
 # ---------- Example CLI ----------
-add_executable(rl_cli examples/cli.cpp)
-target_link_libraries(rl_cli PRIVATE ratelimit_core)
+if (NOT RL_BUILD_WASM)
+  add_executable(rl_cli examples/cli.cpp)
+  target_link_libraries(rl_cli PRIVATE ratelimit_core)
+endif()
 
 # --- Tests (GoogleTest via FetchContent)
 if (RL_BUILD_TESTS)
@@ -214,84 +320,87 @@ if (RL_BUILD_BENCH)
 endif()
 
 # ---------- Install / export ----------
-include(GNUInstallDirs)
+# Not part of the WebAssembly build, which installs nothing.
+if (NOT RL_BUILD_WASM)
+  include(GNUInstallDirs)
 
-# Install headers (exclude template input) + generated version.h
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        PATTERN "ratelimit/version.h.in" EXCLUDE)
-install(FILES ${RL_GEN_DIR}/ratelimit/version.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ratelimit)
+  # Install headers (exclude template input) + generated version.h
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+          PATTERN "ratelimit/version.h.in" EXCLUDE)
+  install(FILES ${RL_GEN_DIR}/ratelimit/version.h
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ratelimit)
 
-# Collect targets to export; conditionally include 'ratelimit' and 'ratelimit_jni'
-set(RL_INSTALL_TARGETS ratelimit_core ratelimit_c rl_cli)
-if (RL_BUILD_SHARED)
-  list(APPEND RL_INSTALL_TARGETS ratelimit)
-endif()
-if (RL_BUILD_JNI)
-  list(APPEND RL_INSTALL_TARGETS ratelimit_jni)
-endif()
+  # Collect targets to export; conditionally include 'ratelimit' and 'ratelimit_jni'
+  set(RL_INSTALL_TARGETS ratelimit_core ratelimit_c rl_cli)
+  if (RL_BUILD_SHARED)
+    list(APPEND RL_INSTALL_TARGETS ratelimit)
+  endif()
+  if (RL_BUILD_JNI)
+    list(APPEND RL_INSTALL_TARGETS ratelimit_jni)
+  endif()
 
-install(TARGETS ${RL_INSTALL_TARGETS}
-  EXPORT ratelimitTargets
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
+  install(TARGETS ${RL_INSTALL_TARGETS}
+    EXPORT ratelimitTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  )
 
-# Export for build-tree usage and install the export for find_package
-export(EXPORT ratelimitTargets
-  FILE "${CMAKE_CURRENT_BINARY_DIR}/RatelimitTargets.cmake"
-  NAMESPACE Ratelimit::
-)
+  # Export for build-tree usage and install the export for find_package
+  export(EXPORT ratelimitTargets
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/RatelimitTargets.cmake"
+    NAMESPACE Ratelimit::
+  )
 
-# ---------- CMake package config (for find_package) ----------
-include(CMakePackageConfigHelpers)
+  # ---------- CMake package config (for find_package) ----------
+  include(CMakePackageConfigHelpers)
 
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfigVersion.cmake"
-  VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMajorVersion
-)
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+  )
 
-configure_file(
-  cmake/RatelimitConfig.cmake.in
-  "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfig.cmake"
-  @ONLY
-)
-
-# pkg-config files find the install tree from their own location, so they
-# stay correct with `cmake --install --prefix` and after the tree is moved.
-if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" OR IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
-  set(RL_PC_PREFIX "${CMAKE_INSTALL_PREFIX}")
-  set(RL_PC_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
-  set(RL_PC_INCLUDEDIR "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
-else()
-  file(RELATIVE_PATH RL_PC_UP "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "${CMAKE_BINARY_DIR}")
-  string(REGEX REPLACE "/$" "" RL_PC_UP "${RL_PC_UP}")
-  set(RL_PC_PREFIX "\${pcfiledir}/${RL_PC_UP}")
-  set(RL_PC_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
-  set(RL_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
-endif()
-
-# ratelimit: the C++ API (static core); ratelimit_c: the C API (shared).
-foreach(pc ratelimit ratelimit_c)
   configure_file(
-    cmake/${pc}.pc.in
-    "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
+    cmake/RatelimitConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfig.cmake"
     @ONLY
   )
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
-          DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
-endforeach()
 
-install(FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfig.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfigVersion.cmake"
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ratelimit
-)
+  # pkg-config files find the install tree from their own location, so they
+  # stay correct with `cmake --install --prefix` and after the tree is moved.
+  if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" OR IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+    set(RL_PC_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    set(RL_PC_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set(RL_PC_INCLUDEDIR "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+  else()
+    file(RELATIVE_PATH RL_PC_UP "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "${CMAKE_BINARY_DIR}")
+    string(REGEX REPLACE "/$" "" RL_PC_UP "${RL_PC_UP}")
+    set(RL_PC_PREFIX "\${pcfiledir}/${RL_PC_UP}")
+    set(RL_PC_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
+    set(RL_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+  endif()
 
-install(EXPORT ratelimitTargets
-  NAMESPACE Ratelimit::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ratelimit
-)
+  # ratelimit: the C++ API (static core); ratelimit_c: the C API (shared).
+  foreach(pc ratelimit ratelimit_c)
+    configure_file(
+      cmake/${pc}.pc.in
+      "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
+      @ONLY
+    )
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${pc}.pc"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+  endforeach()
+
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/RatelimitConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ratelimit
+  )
+
+  install(EXPORT ratelimitTargets
+    NAMESPACE Ratelimit::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ratelimit
+  )
+endif()

@@ -23,6 +23,7 @@ A thread-safe, in-process rate limiter for C++20, with C and Java (JNI) bindings
 - [Challenges and what I learned](#challenges-and-what-i-learned)
 - [Limitations](#limitations)
 - [Building, installing and using it from CMake](#building-installing-and-using-it-from-cmake)
+- [Build for WebAssembly](#build-for-webassembly)
 - [Project layout](#project-layout)
 
 ---
@@ -375,8 +376,10 @@ Other findings:
 | `RL_BUILD_JNI`    |    `ON` | Build the JNI library (needs a JDK)            |
 | `RL_ENABLE_ASAN`  |   `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer  |
 | `RL_ENABLE_TSAN`  |   `OFF` | ThreadSanitizer                                |
+| `RL_BUILD_WASM`   |   `OFF` | WebAssembly build of the C API (see below)     |
+| `RL_BUILD_PARITY` |   `OFF` | Native parity runner and its tests (see below) |
 
-Targets: `ratelimit_core` (static C++), `ratelimit` (shared C++), `ratelimit_c` (shared C API), `ratelimit_jni`, `rl_cli`, `rl_tests`, `rl_c_api_test`, `rl_bench`, `rl_latency`.
+Targets: `ratelimit_core` (static C++), `ratelimit` (shared C++), `ratelimit_c` (shared C API), `ratelimit_jni`, `rl_cli`, `rl_tests`, `rl_c_api_test`, `rl_bench`, `rl_latency`, `rl_parity_native` with `RL_BUILD_PARITY`, and `ratelimit_wasm` in the WebAssembly build.
 
 Install, then build the sample consumer against the install:
 
@@ -403,6 +406,28 @@ c++ app.cpp $(pkg-config --cflags --libs ratelimit)     # C++ API, static librar
 
 A program linked against the shared `ratelimit_c` needs the library on the loader path at run time (for example `LD_LIBRARY_PATH="$PWD/install/lib"`) unless it's installed system-wide.
 
+## Build for WebAssembly
+
+The C API also builds as a WebAssembly ES module, so the same limiter code can run in a browser or under Node. The toolchain is Emscripten 7.0.0, pinned. Install it with [emsdk](https://github.com/emscripten-core/emsdk), then run the build script from the repo root:
+
+```sh
+source ~/emsdk/emsdk_env.sh            # emsdk with Emscripten 7.0.0 activated
+bash scripts/build-wasm.sh <out-dir>
+```
+
+The script configures with `emcmake cmake -DRL_BUILD_WASM=ON`, with the shared libraries, tests, benchmarks and JNI off. CMake stops with an error if any of them is on, or if Emscripten isn't the toolchain. The script builds the `ratelimit_wasm` target and writes two files to `<out-dir>`: `ratelimit.mjs`, the ES-module glue, and `ratelimit.wasm`. It then loads the module under Node, makes one real `rl_allow_at` decision, and prints the sha256 of both files. It refuses a tree with uncommitted changes unless you pass `--allow-dirty`.
+
+The module exports `rl_version`, `rl_new_inproc`, `rl_allow_at`, `rl_inspect_at` and `rl_free`, plus `malloc` and `free` for passing keys and structs. The functions that read the limiter's own clock (`rl_now_ns`, `rl_allow`, `rl_inspect`, `rl_try_acquire`) and `rl_evict_idle` are not exported, so the caller supplies every time. From JavaScript, `uint64_t` arguments and fields are BigInts, and a function that returns a struct writes it to a buffer passed as an extra first argument.
+
+How it differs from the native library:
+
+- It is single-threaded: no pthreads, and no memory shared between threads.
+- A C++ exception aborts the module, which is Emscripten's default. Natively, `rl_new_inproc` catches one (a failed allocation, for example) and returns `NULL`; in the module the same failure aborts.
+
+The script pins the Emscripten version and fixes the build inputs (`RL_BUILD_TS`, `RL_GIT_DESCRIBE`), so the same sources rebuild to byte-identical files, from any directory.
+
+Parity tests check that the module and the native C API give identical decisions and inspection values on shared traces. In the WebAssembly build tree, `ctest` runs them against golden files written by a native runner (`-DRL_BUILD_PARITY=ON`); neither is part of a default build. See [tests/parity/README.md](tests/parity/README.md).
+
 ## Project layout
 
 ```text
@@ -411,8 +436,9 @@ src/                 inproc_rate_limiter.cpp (the limiter), clock.cpp + fast_clo
 c_api/               C API implementation
 jni/                 JNI bridge and its Java class
 examples/cli.cpp     rl_cli
-tests/               test_core.cpp (GoogleTest), test_c_api.c
+tests/               test_core.cpp (GoogleTest), test_c_api.c, parity/ (native vs WebAssembly)
 bench/               bench_core.cpp (Google Benchmark), latency.cpp
+scripts/             build-wasm.sh (WebAssembly build)
 consumer/            sample CMake project using an installed copy
 cmake/               package config and pkg-config templates
 ```

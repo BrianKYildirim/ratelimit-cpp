@@ -1,0 +1,8 @@
+{"op":"new","shards":0,"hint":0}
+{"op":"inspect","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"inspect","key":"6b","cap":3,"rate":1,"t":0}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":1000000000}
