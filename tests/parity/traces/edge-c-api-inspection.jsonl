@@ -1,0 +1,17 @@
+{"op":"new","shards":0,"hint":0}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60000000000}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60000000000}
+{"op":"allow","key":"6b","cap":2,"rate":10,"t":60000000000}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60000000000}
+{"op":"allow","key":"6b","cap":2,"rate":10,"t":60000000000}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60030000001}
+{"op":"allow","key":"6b","cap":2,"rate":10,"t":60030000001}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60100000000}
+{"op":"allow","key":"6b","cap":2,"rate":10,"t":60100000000}
+{"op":"inspect","key":"6b","cap":2,"rate":10,"t":60100000000}
+{"op":"inspect","key":"7a65726f","cap":0,"rate":5,"t":60000000000}
+{"op":"allow","key":"647279","cap":1,"rate":0,"t":60000000000}
+{"op":"inspect","key":"647279","cap":1,"rate":0,"t":1060000000000}
+{"op":"allow","key":"647279","cap":1,"rate":0,"t":1060000000000}
+{"op":"inspect","key":"6b0069676e6f726564","cap":2,"rate":10,"t":60000000000}
+{"op":"inspect","key":"6472790078","cap":1,"rate":0,"t":60000000000}

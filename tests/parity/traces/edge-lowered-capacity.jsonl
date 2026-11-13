@@ -1,0 +1,17 @@
+{"op":"new","shards":0,"hint":0}
+{"op":"allow","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"allow","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"allow","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"allow","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6b","cap":3,"rate":1,"t":50000000000}
+{"op":"allow","key":"6b","cap":3,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6b","cap":3,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"allow","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6b","cap":10,"rate":1,"t":50000000000}
+{"op":"allow","key":"6c","cap":100,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6c","cap":5,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6c","cap":100,"rate":1,"t":50000000000}
+{"op":"allow","key":"6c","cap":5,"rate":1,"t":50000000000}
+{"op":"inspect","key":"6c","cap":100,"rate":1,"t":50000000000}
+{"op":"allow","key":"6c","cap":100,"rate":1,"t":50000000000}

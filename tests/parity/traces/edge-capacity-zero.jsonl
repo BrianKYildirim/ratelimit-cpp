@@ -1,0 +1,13 @@
+{"op":"new","shards":0,"hint":0}
+{"op":"inspect","key":"7a","cap":0,"rate":5,"t":50000000000}
+{"op":"allow","key":"7a","cap":0,"rate":5,"t":50000000000}
+{"op":"inspect","key":"7a","cap":0,"rate":5,"t":50000000000}
+{"op":"inspect","key":"7a","cap":0,"rate":5,"t":51000000000}
+{"op":"allow","key":"7a","cap":0,"rate":5,"t":51000000000}
+{"op":"inspect","key":"7a","cap":0,"rate":5,"t":51000000000}
+{"op":"allow","key":"7a65726f","cap":0,"rate":0,"t":50000000000}
+{"op":"inspect","key":"7a65726f","cap":0,"rate":0,"t":50000000000}
+{"op":"allow","key":"66617374","cap":0,"rate":1000,"t":50000000000}
+{"op":"allow","key":"66617374","cap":0,"rate":1000,"t":51000000000}
+{"op":"allow","key":"66617374","cap":0,"rate":1000,"t":52000000000}
+{"op":"inspect","key":"66617374","cap":0,"rate":1000,"t":52000000000}
